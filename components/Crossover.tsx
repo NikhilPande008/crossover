@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Brief, Comp, ProgressEvent, RunResult, TraceEntry } from "@/lib/types";
 import type { Candidate } from "@/lib/qloo/api";
 import { PRESETS, type Preset } from "@/lib/presets";
+import { isCloseMatch } from "@/lib/match";
 import { Badge, Button, Card, Label, cx } from "./ui";
 import { Results } from "./Results";
 
@@ -476,6 +477,9 @@ function Confirm({
                     const c = r.candidates.find((c) => c.entityId === picked[r.query]);
                     return c ? (
                       <div>
+                        {!isCloseMatch(r.query, c.name) && (
+                          <div className="mb-1 text-sm text-warn">No close match for “{r.query}” in Qloo. This is the nearest result; pick another or leave it out.</div>
+                        )}
                         <span className="font-semibold">{c.name}</span>{" "}
                         <span className="text-sm text-muted">
                           {c.type.replace("_", " ")}

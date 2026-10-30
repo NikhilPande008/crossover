@@ -171,3 +171,29 @@ describe("no personal data to Qloo", async () => {
       expect(ResolveRequest.safeParse({ comps: [ok], format: "film" }).success).toBe(true);
   });
 });
+
+describe("plan request input", () => {
+  it("clips long Qloo descriptors instead of rejecting the run", async () => {
+    const { PlanRequest } = await import("@/lib/validate/input");
+    const long = "x".repeat(650);
+    const r = PlanRequest.safeParse({
+      brief,
+      comps: [
+        { ...comp("a"), descriptor: long },
+        { ...comp("b"), descriptor: long },
+      ],
+    });
+    expect(r.success).toBe(true);
+    expect(r.success && r.data.comps[0].descriptor?.length).toBe(400);
+  });
+});
+
+describe("comp match closeness", () => {
+  it("flags a made-up title but not a real one", async () => {
+    const { isCloseMatch } = await import("@/lib/match");
+    expect(isCloseMatch("Glorbnax Quintessence 3000", "Three Thousand Years of Longing")).toBe(false);
+    expect(isCloseMatch("Perks of Being a Wallflower", "The Perks of Being a Wallflower")).toBe(true);
+    expect(isCloseMatch("hereditary", "Hereditary")).toBe(true);
+    expect(isCloseMatch("The Witch", "The Witcher")).toBe(false);
+  });
+});

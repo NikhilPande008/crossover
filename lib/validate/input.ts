@@ -22,7 +22,11 @@ export const CompSchema = z.object({
   entityId: z.string().min(1).max(200),
   type: z.enum(["movie", "tv_show", "artist", "book", "podcast", "brand"]),
   year: z.number().optional(),
-  descriptor: z.string().max(400).optional(),
+  // Display-only text from Qloo search; live descriptions can run past 600 characters, so clip rather than reject.
+  descriptor: z
+    .string()
+    .transform((s) => s.slice(0, 400))
+    .optional(),
 });
 
 export const PlanRequest = z.object({

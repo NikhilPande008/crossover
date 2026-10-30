@@ -35,9 +35,16 @@ export async function searchEntities(client: QlooClient, query: string, types: E
       name: r.name,
       type: URN_TO_TYPE[urn] ?? types[0],
       year: r.properties?.release_year ?? r.properties?.year,
-      descriptor: r.properties?.short_description ?? r.properties?.description,
+      descriptor: clip(r.properties?.short_description ?? r.properties?.description, 280),
     };
   });
+}
+
+/** Shorten to at most n characters, at a word boundary. */
+function clip(s: string | undefined, n: number): string | undefined {
+  if (!s || s.length <= n) return s;
+  const cut = s.slice(0, n - 1);
+  return `${cut.slice(0, cut.lastIndexOf(" ") > 0 ? cut.lastIndexOf(" ") : cut.length).trimEnd()}…`;
 }
 
 function base(res: QlooResponse, path: string, params: Record<string, string>, compIds: string[]) {
