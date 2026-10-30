@@ -101,11 +101,14 @@ export function compareGroup(f: Fact): "shared" | "a" | "b" {
  * shown to the user and the creative angle, not the overlap score.
  */
 function themesFromCompare(facts: Fact[], a: string, b: string) {
-  const fs = facts.filter((f) => f.kind === "compare" && f.compIds[0] === a && f.compIds[1] === b);
+  let fs = facts.filter((f) => f.kind === "compare" && f.compIds[0] === a && f.compIds[1] === b);
+  // The pair may have been compared the other way round; then Qloo's "a" side is our b.
+  const flipped = !fs.length;
+  if (flipped) fs = facts.filter((f) => f.kind === "compare" && f.compIds[0] === b && f.compIds[1] === a);
   if (!fs.length) return null;
   const strength = (f: Fact) => (typeof f.value === "number" ? Math.abs(f.value) : 0);
   const pick = (g: "shared" | "a" | "b") => fs.filter((f) => compareGroup(f) === g).sort((x, y) => strength(y) - strength(x));
-  return { shared: pick("shared"), onlyA: pick("a"), onlyB: pick("b"), factIds: fs.map((f) => f.id) };
+  return { shared: pick("shared"), onlyA: pick(flipped ? "b" : "a"), onlyB: pick(flipped ? "a" : "b"), factIds: fs.map((f) => f.id) };
 }
 
 function perComp(facts: Fact[], c: string, kinds: Fact["kind"][]) {
@@ -114,9 +117,10 @@ function perComp(facts: Fact[], c: string, kinds: Fact["kind"][]) {
 }
 
 /**
- * One audience or two? Jaccard overlap of the two comps' own audience affinities
- * (partners across all domains, each fetched per comp). Falls back to taste tags when
- * no per-comp affinities exist. Themes come from the compare endpoint when available.
+ * One audience or two? The verdict (`similar`) comes from the share of themes the two
+ * titles have in common: Qloo's compare endpoint when available, else each comp's own
+ * taste tags. `score` is the Jaccard overlap of the comps' own top audience affinities
+ * (falling back to tags); it is shown for context but is low for every pair seen live.
  */
 export function buildOverlap(facts: Fact[], a: string, b: string): Overlap {
   let A = perComp(facts, a, ["affinity"]);
@@ -134,6 +138,19 @@ export function buildOverlap(facts: Fact[], a: string, b: string): Overlap {
   const uniq = (xs: string[]) => [...new Set(xs)];
   const tagsA = perComp(facts, a, ["tag"]);
   const tagsB = perComp(facts, b, ["tag"]);
+  // The verdict rests on themes: compare's shared vs one-sided tags, else the per-comp tag lists.
+  let themeShared: number;
+  let themesCompared: number;
+  if (themes) {
+    const sharedNames = new Set(themes.shared.map(name));
+    const all = new Set([...sharedNames, ...themes.onlyA.map(name), ...themes.onlyB.map(name)]);
+    themeShared = sharedNames.size;
+    themesCompared = all.size;
+  } else {
+    themeShared = [...tagsA.keys()].filter((k) => tagsB.has(k)).length;
+    themesCompared = new Set([...tagsA.keys(), ...tagsB.keys()]).size;
+  }
+  const themeShare = round(themesCompared ? themeShared / themesCompared : 0);
   return {
     a,
     b,
@@ -145,6 +162,9 @@ export function buildOverlap(facts: Fact[], a: string, b: string): Overlap {
     onlyA: themes ? uniq(themes.onlyA.map(name)).slice(0, 5) : uniq([...tagsA.values()].filter((f) => !tagsB.has(f.subject!.entityId ?? f.subject!.name)).map(name)).slice(0, 5),
     onlyB: themes ? uniq(themes.onlyB.map(name)).slice(0, 5) : uniq([...tagsB.values()].filter((f) => !tagsA.has(f.subject!.entityId ?? f.subject!.name)).map(name)).slice(0, 5),
     source: themes ? "compare-endpoint" : "estimated-from-tags",
+    themeShare,
+    themesCompared,
+    similar: themesCompared > 0 && themeShare >= THRESHOLDS.sharedThemes,
     factIds: [...sharedKeys.flatMap((k) => [A.get(k)!.id, B.get(k)!.id]), ...(themes?.factIds.slice(0, 6) ?? [])],
   };
 }

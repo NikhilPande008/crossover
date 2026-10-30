@@ -141,7 +141,7 @@ export function fixtureResponse(req: QlooRequest): unknown {
     const a = mean(compVectors(aIds));
     const b = mean(compVectors(bIds));
     const rows = SYNTHETIC_TAGS.map((t) => ({ t, aa: affinity(a, t, "tag"), bb: affinity(b, t, "tag") }));
-    const tag = (r: (typeof rows)[number], query: Record<string, unknown>) => ({ tag_id: `syn-tag-${r.t}`, name: r.t, type: "urn:tag", subtype: "urn:tag:keyword:qloo", popularity: 0.5, query });
+    const tag = (r: (typeof rows)[number], query: Record<string, unknown>) => ({ tag_id: `urn:tag:keyword:qloo:syn-${r.t}`, name: r.t, type: "urn:tag", subtype: "urn:tag:keyword:qloo", popularity: 0.5, query });
     const sideA = rows.filter((r) => r.aa >= 0.5);
     const sideB = rows.filter((r) => r.bb >= 0.5);
     const shared = sideA.filter((r) => r.bb >= 0.5).sort((x, y) => Math.min(y.aa, y.bb) - Math.min(x.aa, x.bb));
@@ -165,7 +165,7 @@ export function fixtureResponse(req: QlooRequest): unknown {
     const take = Number(p.take ?? 10);
 
     if (type === "urn:tag") {
-      const tags = SYNTHETIC_TAGS.map((t) => ({ tag_id: `syn-tag-${t}`, name: t, type: "urn:tag:keyword", query: { affinity: affinity(signal, t, "tag") } }))
+      const tags = SYNTHETIC_TAGS.map((t) => ({ tag_id: `urn:tag:keyword:qloo:syn-${t}`, name: t, type: "urn:tag:keyword", query: { affinity: affinity(signal, t, "tag") } }))
         .sort((x, y) => y.query.affinity - x.query.affinity)
         .slice(0, take);
       return { success: true, results: { tags } };
@@ -207,7 +207,7 @@ export function fixtureResponse(req: QlooRequest): unknown {
         entity_id: synId(type.split(":").pop()!, e.name),
         name: e.name,
         types: [type],
-        tags: (e.tags ?? []).map((t) => ({ tag_id: `syn-tag-${t}`, name: t })),
+        tags: (e.tags ?? []).map((t) => ({ tag_id: `urn:tag:keyword:qloo:syn-${t}`, name: t })),
         popularity: Math.round(rng(fnv1a(e.name + "pop"))() * 1000) / 1000,
         query: { affinity: affinity(signal, e.name) },
       }))

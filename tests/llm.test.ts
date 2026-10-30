@@ -43,7 +43,7 @@ describe("pricing", () => {
     expect(s.byPhase.map((p) => p.phase)).toEqual(["research", "brief"]);
     m.record({ phase: "brief", provider: "openai", model: "unknown", inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, ms: 1 });
     expect(m.summary().costUsd).toBeNull();
-    expect(formatUsage(m.summary())).toMatch(/cost unknown/);
+    expect(formatUsage(m.summary())).toMatch(/cost not tracked/);
   });
 });
 

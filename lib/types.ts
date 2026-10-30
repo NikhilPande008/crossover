@@ -103,6 +103,12 @@ export type Overlap = {
   onlyB: string[];
   /** Where the themes came from. */
   source: "compare-endpoint" | "estimated-from-tags";
+  /** Share of the pair's distinct themes that both titles have, 0..1. Decides "one audience or two". */
+  themeShare: number;
+  /** How many distinct themes themeShare was computed over. */
+  themesCompared: number;
+  /** themeShare at or above THRESHOLDS.sharedThemes: one audience to bridge rather than two to choose between. */
+  similar: boolean;
   factIds: string[];
 };
 

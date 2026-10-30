@@ -109,6 +109,6 @@ function round6(n: number) {
 
 export function formatUsage(u: Pick<UsageSummary, "inputTokens" | "outputTokens" | "costUsd" | "provider">): string {
   const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
-  const cost = u.costUsd === null ? "cost unknown (set LLM_PRICE_*_PER_MTOK)" : u.provider === "ollama" && u.costUsd === 0 ? "$0 (local)" : `$${u.costUsd < 0.01 ? u.costUsd.toFixed(4) : u.costUsd.toFixed(3)}`;
+  const cost = u.costUsd === null ? "cost not tracked" : u.provider === "ollama" && u.costUsd === 0 ? "$0 (local)" : `$${u.costUsd < 0.01 ? u.costUsd.toFixed(4) : u.costUsd.toFixed(3)}`;
   return `${k(u.inputTokens)} in / ${k(u.outputTokens)} out · ${cost}`;
 }

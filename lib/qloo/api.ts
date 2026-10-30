@@ -99,19 +99,34 @@ export async function fetchAffinities(
     );
 }
 
+/**
+ * urn:tag insights return tags from every Qloo domain, so a film's audience also gets
+ * restaurant genres, credit cards, hotel ratings, book genres ("Classics") and podcast
+ * themes ("Brand Building"). Creative angles need story tags: urn:tag:<type>:<media|qloo>:…
+ * with a story type. Checked against live Hereditary and Fleabag tag lists (2026-10-30).
+ */
+const STORY_TAG_TYPES = new Set(["plot", "style", "motif", "archetype", "character", "audience", "mood", "keyword"]);
+
+export function isCreativeTag(tagId: string | undefined): boolean {
+  const [, , type, domain] = (tagId ?? "").split(":");
+  return (domain === "media" || domain === "qloo") && STORY_TAG_TYPES.has(type);
+}
+
 export async function fetchTags(client: QlooClient, store: FactStore, comps: Comp[], take = 12): Promise<Fact[]> {
-  const params = { "filter.type": "urn:tag", "signal.interests.entities": ids(comps), take: String(take) };
+  // Over-fetch, since most of the list is filtered out (see isCreativeTag).
+  const params = { "filter.type": "urn:tag", "signal.interests.entities": ids(comps), take: String(Math.min(50, take * 4)) };
   const res = await client.get("/v2/insights", params);
   const parsed = TagsResponse.safeParse(res.data);
   if (!parsed.success) return [];
   return parsed.data.results.tags
     .map((t) => ({ ...t, aff: t.affinity ?? t.query?.affinity }))
-    .filter((t): t is typeof t & { aff: number } => typeof t.aff === "number")
+    .filter((t): t is typeof t & { aff: number } => typeof t.aff === "number" && isCreativeTag(t.tag_id ?? t.id))
+    .slice(0, take)
     .map((t, i) =>
       store.add({
         ...base(res, "/v2/insights", params, comps.map((c) => c.entityId)),
         kind: "tag",
-        subject: { entityId: t.tag_id ?? t.id, name: t.name, type: "tag" },
+        subject: { entityId: t.tag_id ?? t.id, name: t.name.trim(), type: "tag" },
         value: t.aff,
         detail: { rank: i + 1 },
       }),
@@ -229,7 +244,7 @@ export async function compareAudiences(client: QlooClient, store: FactStore, a: 
     store.add({
       ...base(res, COMPARE_PATH, params, [a.entityId, b.entityId]),
       kind: "compare",
-      subject: { entityId: it.id, name: it.name, type: "tag" },
+      subject: { entityId: it.id, name: it.name.replace(/[\s,;]+$/, "").trim(), type: "tag" },
       // a − b when both scores are known; otherwise the item's own score (or 1) and its group.
       value: it.delta ?? it.score ?? 1,
       detail: {

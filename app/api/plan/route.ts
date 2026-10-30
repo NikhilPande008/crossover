@@ -9,6 +9,19 @@ import { config } from "@/lib/config";
 
 export const maxDuration = 120;
 
+/** Partner tag lists are only needed server-side (exclusion checks) and are over a third of the payload. */
+function forClient(r: RunResult): RunResult {
+  return {
+    ...r,
+    facts: r.facts.map((f) => {
+      if (!f.detail || !("tags" in f.detail)) return f;
+      const { tags: _tags, ...detail } = f.detail;
+      void _tags;
+      return { ...f, detail };
+    }),
+  };
+}
+
 export async function POST(req: Request) {
   const parsed = PlanRequest.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Invalid request", issues: parsed.error.issues, example: EXAMPLE_PLAN_REQUEST }, { status: 422 });
@@ -65,7 +78,7 @@ export async function POST(req: Request) {
           send({ type: "step", message: `${blocked} Replaying a recorded live run (no Qloo calls made now).`, calls: 0 });
           const replay: RunResult = { ...rec, runId: crypto.randomUUID() };
           saveRun(replay);
-          send({ type: "result", result: replay });
+          send({ type: "result", result: forClient(replay) });
           return;
         }
 
@@ -81,7 +94,7 @@ export async function POST(req: Request) {
         );
         saveRun(result);
         if (body.presetId && !isRefinement && body.refinements.excludedPartners.length === 0 && body.refinements.pinnedMarkets.length === 0) recordPreset(body.presetId, result);
-        send({ type: "result", result });
+        send({ type: "result", result: forClient(result) });
       } catch (e) {
         if (e instanceof RunAborted) return;
         console.error("plan failed", e);

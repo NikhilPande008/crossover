@@ -3,7 +3,6 @@
 
 import { z } from "zod";
 import type { AudienceMap, Comp, Concept, DecisionBrief } from "@/lib/types";
-import { THRESHOLDS } from "@/lib/thresholds";
 
 export const DISCLAIMER =
   "Qloo affinity describes aggregate taste overlap among audiences. It is not a forecast of box office, streams, ticket sales or campaign performance.";
@@ -20,9 +19,9 @@ export const BriefOut = z.object({
 const RANK = { high: 3, medium: 2, low: 1 } as const;
 
 export function pickRecommended(concepts: Concept[], audience: AudienceMap): Concept {
-  const meanOverlap = audience.overlaps.length ? audience.overlaps.reduce((s, o) => s + o.score, 0) / audience.overlaps.length : 0;
-  // Tie-break: bridge when comps overlap, otherwise lead with one audience.
-  const prefer = meanOverlap >= THRESHOLDS.splitOverlap ? "partner" : "market";
+  // Tie-break: bridge when most comp pairs share an audience, otherwise lead with one audience.
+  const similar = audience.overlaps.filter((o) => o.similar).length;
+  const prefer = audience.overlaps.length && similar * 2 >= audience.overlaps.length ? "partner" : "market";
   return [...concepts].sort((a, b) => RANK[b.confidence] - RANK[a.confidence] || Number(b.lever === prefer) - Number(a.lever === prefer))[0];
 }
 
@@ -49,7 +48,7 @@ export function templateBrief(concepts: Concept[], audience: AudienceMap, comps:
     })),
     tradeoffs: [
       rec.lever === "market" ? "Concentrated markets limit reach outside the lead audience's strongholds." : "Broader partner reach may dilute the message for each comp's core fans.",
-      overlap && overlap.score < THRESHOLDS.splitOverlap ? `${comps.find((c) => c.entityId === overlap.a)?.name} and ${comps.find((c) => c.entityId === overlap.b)?.name} look like different audiences, so one plan will not serve both equally.` : "The comps share much of their audience, so concepts differ more in channel than in audience.",
+      overlap && !overlap.similar ? `${comps.find((c) => c.entityId === overlap.a)?.name} and ${comps.find((c) => c.entityId === overlap.b)?.name} look like different audiences, so one plan will not serve both equally.` : "The comps share much of their audience, so concepts differ more in channel than in audience.",
     ].filter(Boolean),
     testChecklist: [
       m0 && rec.markets[1] ? `Run a small paid social test in ${m0.name} against ${rec.markets[1].name} before committing the market budget.` : "Run a small paid social test in the top two markets before committing the market budget.",

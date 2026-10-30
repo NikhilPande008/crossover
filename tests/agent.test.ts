@@ -55,7 +55,7 @@ describe("agent (fixture mode)", () => {
     const [swapRes] = await resolveComps(new QlooClient({ maxCalls: 2, mode: "fixture" }), [preset.swap.to], preset.compTypes);
     const swapped = comps.map((c) => (c.name === preset.swap.from ? bestCandidate(swapRes)! : c));
     const next = await runPlan({ brief: preset.brief, comps: swapped, priorFacts: run.facts, mode: "fixture" });
-    expect(next.qlooCalls).toBeLessThan(10);
+    expect(next.qlooCalls).toBeLessThanOrEqual(10); // only the new comp: 4 domains, tags, 2 regions, demographics, 2 compares
     const d = diffRuns(run, next);
     expect(d.marketsChanged + d.partnersChanged).toBeGreaterThan(0);
   });

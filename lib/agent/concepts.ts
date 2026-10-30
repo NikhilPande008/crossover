@@ -149,7 +149,7 @@ export function templateConcepts(audience: AudienceMap, cand: Candidates, comps:
   };
   // The comp least like the lead: lowest overlap with it, whichever side of the pair it is on.
   const overlapWithLead = (c: Comp) =>
-    audience.overlaps.find((o) => (o.a === lead.entityId && o.b === c.entityId) || (o.b === lead.entityId && o.a === c.entityId))?.score ?? 0;
+    audience.overlaps.find((o) => (o.a === lead.entityId && o.b === c.entityId) || (o.b === lead.entityId && o.a === c.entityId))?.themeShare ?? 0;
   const weakest = others.length ? topBy(others, (c) => -overlapWithLead(c), 1)[0] : lead;
   const adjDomains = [screen, "book"].filter(Boolean) as Domain[];
   const crossover: Concept = {

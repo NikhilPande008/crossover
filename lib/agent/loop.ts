@@ -13,7 +13,7 @@ import { getLLM, noteLLM, type LLM } from "@/lib/llm/provider";
 import { UsageMeter, formatUsage } from "@/lib/llm/usage";
 import { buildAudienceMap } from "@/lib/score";
 import { THRESHOLDS } from "@/lib/thresholds";
-import { makeContext, validateCited, validateUncited, type GroundingContext } from "@/lib/validate/grounding";
+import { makeContext, stripCitations, validateCited, validateUncited, type GroundingContext } from "@/lib/validate/grounding";
 import { buildScoreScope } from "@/lib/validate/comparative";
 import type { Refinements } from "@/lib/validate/constraints";
 import { assessEvidence, attemptKey, describeGap, gapToCall, type Attempted, type PlannedCall } from "./assess";
@@ -150,8 +150,11 @@ export async function runPlan(input: PlanInput, emit: (e: ProgressEvent) => void
   for (const o of audience.overlaps) {
     const an = comps.find((c) => c.entityId === o.a)?.name;
     const bn = comps.find((c) => c.entityId === o.b)?.name;
-    const verdict = o.score < THRESHOLDS.splitOverlap ? "diverge (two audiences: pick a lead)" : "overlap strongly (one audience: bridge)";
-    log("decision", `${an} and ${bn} ${verdict}: ${Math.round(o.score * 100)}% of ${o.compared} top audience ${o.basis === "audience-affinities" ? "affinities" : "tags"} shared`);
+    const verdict = o.similar ? "share an audience (bridge them)" : "look like different audiences (pick a lead)";
+    log(
+      "decision",
+      `${an} and ${bn} ${verdict}: ${Math.round(o.themeShare * 100)}% of ${o.themesCompared} themes shared (${o.source === "compare-endpoint" ? "Qloo compare" : "taste tags"}); ${Math.round(o.score * 100)}% of top audience ${o.basis === "audience-affinities" ? "affinities" : "tags"} shared`,
+    );
   }
   step(audience.overlaps.length ? "Compared comp audiences" : "Scored markets and partners");
 
@@ -165,7 +168,7 @@ export async function runPlan(input: PlanInput, emit: (e: ProgressEvent) => void
   let concepts: Concept[] | null = null;
   if (llm && Date.now() < deadline - 10_000) {
     try {
-      concepts = await conceiveWithLLM(llm, meter, brief, comps, cand, store, audience.overlaps.map((o) => `${o.a} vs ${o.b}: overlap ${o.score}; shared ${o.shared.join(", ")}`).join("\n"));
+      concepts = await conceiveWithLLM(llm, meter, brief, comps, cand, store, audience.overlaps.map((o) => `${o.a} vs ${o.b}: ${o.similar ? "one audience" : "two audiences"} (theme share ${o.themeShare}); shared themes ${o.shared.join(", ")}`).join("\n"));
       llmUsed = true;
       log("llm", `Drafted ${concepts.length} concepts`);
     } catch (e) {
@@ -341,6 +344,9 @@ async function briefWithLLM(llm: LLM, meter: UsageMeter, brief: Brief, comps: Co
 
 // ---------- grounding ----------
 
+/** The UI shows citations as chips, so drop fact IDs the model wrote into the prose. */
+const tidy = (t: string) => stripCitations(t).replace(/\s+([.,;:!?])/g, "$1").trim();
+
 function groundConcept(c: Concept, fallback: Concept, g: GroundingContext, log: (k: TraceEntry["kind"], m: string) => void): Concept {
   let { name, creativeAngle } = c;
   const nameIssue = validateUncited(name, g);
@@ -352,13 +358,13 @@ function groundConcept(c: Concept, fallback: Concept, g: GroundingContext, log: 
   if (!angle.ok) {
     log("validator", `Creative angle replaced: ${angle.issue.reason}`);
     creativeAngle = fallback.creativeAngle;
-  } else creativeAngle = { text: creativeAngle.text, factIds: angle.factIds };
+  } else creativeAngle = { text: tidy(creativeAngle.text), factIds: angle.factIds };
   const keep = (xs: string[], label: string) =>
     xs.filter((x) => {
       const issue = validateUncited(x, g);
       if (issue) log("validator", `${label} dropped: ${issue.reason}`);
       return !issue;
-    });
+    }).map(tidy);
   return { ...c, name, creativeAngle, risks: keep(c.risks, "Risk"), hypotheses: keep(c.hypotheses, "Hypothesis") };
 }
 
@@ -379,7 +385,7 @@ function groundBrief(
         log("validator", `Dropped: ${r.issue.reason} — ${JSON.stringify(it.text.slice(0, 120))}`);
         return [];
       }
-      return [{ text: it.text, factIds: r.factIds }];
+      return [{ text: tidy(it.text), factIds: r.factIds }];
     });
   const plain = (items: string[]) =>
     items.filter((t) => {
@@ -390,7 +396,7 @@ function groundBrief(
         log("validator", `Dropped: ${issue.reason} — ${JSON.stringify(t.slice(0, 120))}`);
       }
       return !issue;
-    });
+    }).map(tidy);
   const rec = concepts.find((c) => c.lever === d.recommendedLever) ?? concepts[0];
   const brief: DecisionBrief = {
     recommendedId: rec.id,

@@ -120,7 +120,7 @@ describe("templates", () => {
     overlaps,
     gaps: [],
   });
-  const ov = (a: string, b: string, score: number) => ({ a, b, score, basis: "audience-affinities" as const, compared: 10, sharedAudience: [], shared: [], onlyA: [], onlyB: [], source: "compare-endpoint" as const, factIds: [] });
+  const ov = (a: string, b: string, score: number) => ({ a, b, score, basis: "audience-affinities" as const, compared: 10, sharedAudience: [], shared: [], onlyA: [], onlyB: [], source: "compare-endpoint" as const, themeShare: score, themesCompared: 10, similar: score >= 0.1, factIds: [] });
   const cand: Candidates = { markets: [], partners: [], removals: [] };
 
   it("crossover targets the comp least like the lead, wherever it sits in the pair", () => {
@@ -195,5 +195,15 @@ describe("comp match closeness", () => {
     expect(isCloseMatch("Perks of Being a Wallflower", "The Perks of Being a Wallflower")).toBe(true);
     expect(isCloseMatch("hereditary", "Hereditary")).toBe(true);
     expect(isCloseMatch("The Witch", "The Witcher")).toBe(false);
+  });
+});
+
+describe("creative tag filter", () => {
+  it("keeps story and media tags and drops place, brand and payment tags", async () => {
+    const { isCreativeTag } = await import("@/lib/qloo/api");
+    for (const id of ["urn:tag:plot:qloo:darkly_comedic", "urn:tag:style:qloo:sharp_edged", "urn:tag:keyword:media:stand_up_comedy_special", "urn:tag:archetype:qloo:dysfunctional_family"])
+      expect(isCreativeTag(id)).toBe(true);
+    for (const id of ["urn:tag:genre:brand:entertainment", "urn:tag:genre:music:indie", "urn:tag:credit_card:place:mastercard", "urn:tag:genre:place:restaurant:gastropub", "urn:tag:backdrop:qloo:mexico_city", "urn:tag:genre:media:classics", "urn:tag:theme:qloo:brand_building", undefined])
+      expect(isCreativeTag(id)).toBe(false);
   });
 });

@@ -418,18 +418,23 @@ function AudienceMap({ result, refinements, onRefine, busy }: Parameters<typeof 
         </Card>
         <Card className="lg:col-span-2">
           <Label>One audience or two?</Label>
-          <p className="mt-1 text-xs text-muted">Overlap of each comp&apos;s own top audience affinities across podcasts, artists, TV, film, books and brands. Themes come from Qloo&apos;s compare analysis of the titles.</p>
+          <p className="mt-1 text-xs text-muted">
+            The verdict uses the share of themes the two titles have in common in Qloo&apos;s compare analysis. Top-affinity overlap is how many of each comp&apos;s own top audience affinities (podcasts, artists, TV, film, books, brands) the other comp also has.
+          </p>
           <div className="mt-3 space-y-4">
             {a.overlaps.map((o) => (
               <div key={o.a + o.b}>
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   <b>{name(o.a)}</b> vs <b>{name(o.b)}</b>
-                  <Bar value={o.score} />
-                  <span className="font-mono text-xs" title={`Share of ${o.compared} top audience ${o.basis === "audience-affinities" ? "affinities" : "taste tags"} that both comps have`}>
-                    {Math.round(o.score * 100)}% shared
+                  <Bar value={o.themeShare} />
+                  <span className="font-mono text-xs" title={`${o.themesCompared} distinct themes compared`}>
+                    {Math.round(o.themeShare * 100)}% of themes shared
                   </span>
-                  <Badge tone={o.score >= THRESHOLDS.splitOverlap ? "evidence" : "warn"}>{o.score >= THRESHOLDS.splitOverlap ? "shared audience" : "different audiences"}</Badge>
-                  {o.basis === "taste-tags" && <Badge>estimated from taste tags</Badge>}
+                  <Badge tone={o.similar ? "evidence" : "warn"}>{o.similar ? "shared audience" : "different audiences"}</Badge>
+                  {o.source === "estimated-from-tags" && <Badge>estimated from taste tags</Badge>}
+                  <span className="text-xs text-muted" title={`Share of ${o.compared} top audience ${o.basis === "audience-affinities" ? "affinities" : "taste tags"} that both comps have`}>
+                    top-affinity overlap {Math.round(o.score * 100)}%
+                  </span>
                   <FactChips ids={o.factIds} title={`${name(o.a)} vs ${name(o.b)}`} max={1} />
                 </div>
                 {o.sharedAudience.length > 0 && (
@@ -542,7 +547,7 @@ function Advanced({ result }: { result: RunResult }) {
                 ["Affinity floor for a signal", t.affinityFloor],
                 ["Strong, specific affinity", t.strongAffinity],
                 ["Min. strong results per domain", t.minItemsPerDomain],
-                ["Overlap below which comps are two audiences", t.splitOverlap],
+                ["Theme share at which comps count as one audience", t.sharedThemes],
                 ["Max. shared partners+markets between concepts", t.maxConceptSimilarity],
                 ["Validator drop share that triggers a rewrite", t.maxDroppedShare],
               ].map(([k, v]) => (
@@ -567,9 +572,11 @@ function WithoutQloo({ result }: { result: RunResult }) {
   const [state, setState] = useState<{ loading: boolean; data?: BaselineResult; error?: string }>({ loading: false });
   const load = async () => {
     setState({ loading: true });
-    const r = await fetch("/api/baseline", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ runId: result.runId }) });
-    const j = await r.json();
-    setState(r.ok ? { loading: false, data: j } : { loading: false, error: j.error });
+    // The run goes along too: on a multi-instance host the server that planned it may not get this request.
+    const { runId, mode, brief, comps, facts } = result;
+    const r = await fetch("/api/baseline", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ runId, run: { runId, mode, brief, comps, facts } }) }).catch(() => null);
+    const j = r ? await r.json().catch(() => ({})) : {};
+    setState(r?.ok ? { loading: false, data: j } : { loading: false, error: j.error ?? "Could not reach the server. Please try again." });
   };
   const d = state.data;
   return (

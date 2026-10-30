@@ -15,7 +15,7 @@ Mid-size marketers commit a fixed launch budget to markets, partners and a creat
 1. **Brief** — title, format, logline, 2–4 comps, regions, budget band, exclusions.
 2. **Confirm comps** — each comp is resolved to a Qloo entity before any expensive call.
 3. **Agent research** — a tool-calling loop chooses which Qloo calls to make (domains, per-comp vs combined signals, recovery when a signal is thin). Code checks evidence sufficiency after every turn and fills gaps.
-4. **Score** — deterministic ranking of partners (weighted mean affinity across comps, optional popularity penalty) and markets (mean heatmap percentile across comps). One audience or two: the share of two comps' combined top audience affinities (fetched per comp, all domains) that both comps have, falling back to shared taste tags when per-comp affinities are missing. The compare endpoint adds the themes the comps share and the themes unique to each.
+4. **Score** — deterministic ranking of partners (weighted mean affinity across comps) and markets (mean heatmap percentile across comps). One audience or two: the share of distinct themes two titles have in common in Qloo's compare analysis (10% or more = one audience), falling back to each comp's own taste tags. Overlap of each comp's own top audience affinities is shown alongside, but it is low (1–7%) for every pair we ran live, so it does not decide the verdict. Taste tags are filtered to story and media tags; Qloo's tag list also contains restaurant, payment and hotel tags.
 5. **Conceive** — three concepts with different levers: market-led, partner-led (bridge), crossover. The model picks partners and markets **by candidate key only**; names always come from Qloo facts.
 6. **Critique** — exclusions, regions and pinned markets enforced in code; near-duplicate concepts replaced.
 7. **Brief** — a recommendation with cited rationale, trade-offs and a "test before you spend" checklist. A grounding validator removes any sentence with an uncited claim, an unknown number, an unknown name, a partner, show, artist, brand or city that none of the sentence's own cited facts is about, or a comparison ("higher than", "the strongest", "among the top") that the run's scores contradict. It does not judge whether cited tags actually support an angle's wording.
@@ -39,9 +39,9 @@ Confidence labels are computed in code (comp agreement and affinity strength), n
 | Taste tags | `GET /v2/insights` `filter.type=urn:tag` | Creative-angle evidence |
 | Demographics | `GET /v2/insights` `filter.type=urn:demographics` | Aggregate age and gender skew |
 | Heatmap | `GET /v2/insights` `filter.type=urn:heatmap` | Rank cities by fan concentration |
-| Theme compare | `GET /v2/analysis/compare` (`a.signal.interests.entities`, `b.signal.interests.entities`) | Themes two comps share and themes unique to each. Qloo compares the titles' tags here, not their audiences; the one-audience-or-two verdict comes from the per-comp affinities above |
+| Theme compare | `GET /v2/analysis/compare` (`a.signal.interests.entities`, `b.signal.interests.entities`) | Themes two comps share and themes unique to each; the shared share decides one audience or two (live: Hereditary/The Witch 17%, Hereditary/Lady Bird 3%) |
 
-A full run is about 26 Qloo calls (hard cap 30). A comp swap or refinement re-uses still-valid facts and costs under 10.
+A full run is about 27 Qloo calls (hard cap 30). A comp swap or refinement re-uses still-valid facts and costs about 10 when it reaches the server instance that planned the original run. On a multi-instance host such as Vercel it may land on another instance and become a full run; the diff banner still works because the browser keeps the previous result.
 
 **What an LLM alone cannot do:** say where *these* comps' fans concentrate, tell whether two comps share an audience, or attribute a partner to a specific comp. The **Without Qloo** tab runs the same model on the same brief with no tools and fact-checks every partner it names against Qloo.
 

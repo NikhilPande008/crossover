@@ -90,6 +90,18 @@ describe("buildOverlap", () => {
     const facts = [fact("T1", "tag", ["a"], "dread", 0.99), fact("T2", "tag", ["b"], "dread", 0.99), fact("T3", "tag", ["a"], "grief", 0.99)];
     expect(buildOverlap(facts, "a", "b")).toMatchObject({ basis: "taste-tags", score: 0.5, shared: ["dread"], onlyA: ["grief"], source: "estimated-from-tags" });
   });
+  it("decides one audience or two from the compare theme share, in either pair order", () => {
+    const themes = (shared: number, onlyA: number, onlyB: number, order: string[]) => [
+      ...Array.from({ length: shared }, (_, i) => fact(`S${i}`, "compare", order, `s${i}`, 1, { group: "shared" })),
+      ...Array.from({ length: onlyA }, (_, i) => fact(`A${i}`, "compare", order, `a${i}`, 1, { group: "a" })),
+      ...Array.from({ length: onlyB }, (_, i) => fact(`B${i}`, "compare", order, `b${i}`, 1, { group: "b" })),
+    ];
+    // Live shapes: Hereditary/The Witch 10 of 60 themes shared; Hereditary/Lady Bird 2 of 63.
+    expect(buildOverlap(themes(10, 27, 23, ["a", "b"]), "a", "b")).toMatchObject({ themeShare: 0.167, themesCompared: 60, similar: true });
+    expect(buildOverlap(themes(2, 30, 31, ["a", "b"]), "a", "b")).toMatchObject({ themeShare: 0.032, similar: false });
+    const flipped = buildOverlap(themes(10, 27, 3, ["b", "a"]), "a", "b");
+    expect(flipped).toMatchObject({ similar: true, onlyA: ["b0", "b1", "b2"] });
+  });
   it("still classifies explicit groups", () => {
     expect(compareGroup(fact("F", "compare", ["a", "b"], "x", 1, { group: "b" }))).toBe("b");
   });

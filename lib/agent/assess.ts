@@ -51,10 +51,12 @@ export function assessEvidence(facts: Fact[], comps: Comp[], brief: Brief, attem
     if (!attempted.has(attemptKey("audience_demographics", { comp_id: c.entityId })) && !hasFact(facts, (f) => f.kind === "demographic" && f.compIds[0] === c.entityId))
       gaps.push({ kind: "missing-demographics", compId: c.entityId });
   }
-  for (const b of comps.slice(1)) {
-    const a = comps[0];
-    if (!attempted.has(attemptKey("compare_audiences", { a_id: a.entityId, b_id: b.entityId })) && !hasFact(facts, (f) => f.kind === "compare" && f.compIds[0] === a.entityId && f.compIds[1] === b.entityId))
-      gaps.push({ kind: "missing-compare", a: a.entityId, b: b.entityId });
+  // Every pair for up to three comps (3 calls); with four, the first comp against each other (3 calls, not 6).
+  const pairs = comps.length <= 3 ? comps.flatMap((a, i) => comps.slice(i + 1).map((b) => [a, b] as const)) : comps.slice(1).map((b) => [comps[0], b] as const);
+  for (const [a, b] of pairs) {
+    const done = (x: Comp, y: Comp) =>
+      attempted.has(attemptKey("compare_audiences", { a_id: x.entityId, b_id: y.entityId })) || hasFact(facts, (f) => f.kind === "compare" && f.compIds[0] === x.entityId && f.compIds[1] === y.entityId);
+    if (!done(a, b) && !done(b, a)) gaps.push({ kind: "missing-compare", a: a.entityId, b: b.entityId });
   }
   // A domain is only "thin" once every comp has been tried in it.
   return gaps.filter((g) => g.kind !== "domain-thin" || !gaps.some((x) => x.kind === "missing-affinities" && x.domain === g.domain));

@@ -105,13 +105,15 @@ function Drawer({ ids, title, facts, comps, onClose }: { ids: string[]; title?: 
                       ? "affinity vs. average"
                       : "affinity"}
                 :{" "}
-                <span className="font-mono font-semibold">{String(f.value)}</span>
+                <span className="font-mono font-semibold" title={String(f.value)}>
+                  {fmt(f.value)}
+                </span>
                 {f.detail && (
                   <span className="text-muted">
                     {" "}
                     ({Object.entries(f.detail)
                       .filter(([k]) => k !== "tags")
-                      .map(([k, v]) => `${k} ${v}`)
+                      .map(([k, v]) => `${k} ${fmt(v)}`)
                       .join(", ")}
                     )
                   </span>
@@ -142,4 +144,9 @@ function Drawer({ ids, title, facts, comps, onClose }: { ids: string[]; title?: 
       </aside>
     </div>
   );
+}
+
+/** Qloo returns up to 16 decimals; three are plenty to read. The exact value stays in the tooltip. */
+function fmt(v: unknown): string {
+  return typeof v === "number" && !Number.isInteger(v) ? v.toFixed(3) : String(v);
 }
