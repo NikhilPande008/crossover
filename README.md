@@ -41,7 +41,7 @@ Confidence labels are computed in code (comp agreement and affinity strength), n
 | Heatmap | `GET /v2/insights` `filter.type=urn:heatmap` | Rank cities by fan concentration |
 | Theme compare | `GET /v2/analysis/compare` (`a.signal.interests.entities`, `b.signal.interests.entities`) | Themes two comps share and themes unique to each; the shared share decides one audience or two (live: Hereditary/The Witch 17%, Hereditary/Lady Bird 3%) |
 
-A full run is about 27 Qloo calls (hard cap 30). A comp swap or refinement re-uses still-valid facts and costs about 10 when it reaches the server instance that planned the original run. On a multi-instance host such as Vercel it may land on another instance and become a full run; the diff banner still works because the browser keeps the previous result.
+A full run is about 27–30 Qloo calls (hard cap 36). A comp swap or refinement re-uses still-valid facts and costs about 10 when it reaches the server instance that planned the original run. On a multi-instance host such as Vercel it may land on another instance and become a full run; the diff banner still works because the browser keeps the previous result.
 
 **What an LLM alone cannot do:** say where *these* comps' fans concentrate, tell whether two comps share an audience, or attribute a partner to a specific comp. The **Without Qloo** tab runs the same model on the same brief with no tools and fact-checks every partner it names against Qloo.
 
@@ -137,7 +137,7 @@ See [.env.example](.env.example). Keys stay server-side; the browser never sees 
 | `LLM_PRICE_INPUT_PER_MTOK`, `LLM_PRICE_OUTPUT_PER_MTOK` | — | USD per million tokens, for cost logging of hosted open models |
 | `RUN_WALL_SECONDS` | 60 (240 for Ollama) | Wall-clock budget per run |
 | `QLOO_QUOTA_FLOOR` | `1500` | Below this monthly remaining, live runs pause and presets replay recorded runs |
-| `QLOO_MAX_CALLS_PER_RUN` | `30` | Hard cap per run |
+| `QLOO_MAX_CALLS_PER_RUN` | `36` | Hard cap per run |
 | `LIVE_RUNS_PER_IP_HOUR` | `6` | Per-visitor live-run cap |
 | `TRUSTED_PROXY_HOPS` | `1` | Proxies in front of the app that append to `X-Forwarded-For` (1 for Render, Railway or Vercel); sets which entry is the visitor's IP for the per-visitor caps |
 
