@@ -1,0 +1,6 @@
+# gpt-oss:20b with a context window large enough for Crossover's prompts.
+# Ollama loads gpt-oss with a 4096-token context by default and silently truncates
+# longer prompts; its OpenAI-compatible endpoint ignores per-request num_ctx.
+# Build once (reuses the pulled weights, no download):  npm run ollama:setup
+FROM gpt-oss:20b
+PARAMETER num_ctx 16384

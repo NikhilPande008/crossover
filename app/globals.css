@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #f6f4ef;
+  --surface: #ffffff;
+  --surface-2: #efece5;
+  --ink: #17171a;
+  --muted: #5c5a55;
+  --line: #e2ddd2;
+  --accent: #b93f0f;
+  --accent-ink: #ffffff;
+  --evidence: #0b6b62;
+  --evidence-bg: #e3f3ef;
+  --hyp: #6b2fc9;
+  --hyp-bg: #f0e9fc;
+  --warn: #8a4b06;
+  --warn-bg: #fdf0cf;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111113;
+    --surface: #1a1a1e;
+    --surface-2: #232328;
+    --ink: #ecebe8;
+    --muted: #a6a39d;
+    --line: #2e2e34;
+    --accent: #fb8a4c;
+    --accent-ink: #1a0d05;
+    --evidence: #5fe0cc;
+    --evidence-bg: #0f2e2a;
+    --hyp: #c8b6ff;
+    --hyp-bg: #272040;
+    --warn: #f8c35a;
+    --warn-bg: #352809;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-evidence: var(--evidence);
+  --color-evidence-bg: var(--evidence-bg);
+  --color-hyp: var(--hyp);
+  --color-hyp-bg: var(--hyp-bg);
+  --color-warn: var(--warn);
+  --color-warn-bg: var(--warn-bg);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media print {
+  body {
+    background: #fff;
+    color: #000;
+  }
+}
