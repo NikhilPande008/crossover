@@ -28,6 +28,16 @@ export async function POST(req: Request) {
   const stream = new ReadableStream({
     async start(controller) {
       let open = true;
+      // SSE comment every 10 s so proxies and browsers don't drop the stream during a long model call.
+      const ping = setInterval(() => {
+        if (!open) return;
+        try {
+          controller.enqueue(enc.encode(": ping\n\n"));
+        } catch {
+          open = false;
+          abort.abort();
+        }
+      }, 10_000);
       const send = (e: ProgressEvent) => {
         if (!open) return;
         try {
@@ -77,6 +87,7 @@ export async function POST(req: Request) {
         console.error("plan failed", e);
         send({ type: "error", message: "The run failed unexpectedly. Please try again." });
       } finally {
+        clearInterval(ping);
         if (open) {
           open = false;
           try {

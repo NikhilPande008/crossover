@@ -131,7 +131,8 @@ export class OpenAICompatibleLLM implements LLM {
     this.model = o.model;
     this.reasoningEffort = o.reasoningEffort || undefined;
     // Local models on a laptop are slow; give each call room.
-    this.timeoutMs = o.timeoutMs ?? (o.provider === "ollama" ? 240_000 : 90_000);
+    // Hosted calls must fail well inside the plan route's 120 s limit, so the run can fall back to templates.
+    this.timeoutMs = o.timeoutMs ?? (o.provider === "ollama" ? 240_000 : 40_000);
   }
 
   private async post(body: Record<string, unknown>) {

@@ -14,28 +14,39 @@ type Refinements = { excludedPartners: string[]; pinnedMarkets: string[] };
 
 const EMPTY_BRIEF: Brief = { title: "", format: "film", logline: "", comps: ["", ""], regions: ["US"], budget: "M", exclusions: [] };
 
+/** Never throws: a dropped connection or a stream that ends without a result becomes an error event. */
 export async function streamPlan(body: unknown, onEvent: (e: ProgressEvent) => void) {
-  const res = await fetch("/api/plan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  if (!res.ok || !res.body) {
-    const j = await res.json().catch(() => ({}));
-    onEvent({ type: "error", message: j.error ?? `Request failed (${res.status})` });
-    return;
-  }
-  const reader = res.body.getReader();
-  const dec = new TextDecoder();
-  let buf = "";
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    let i;
-    while ((i = buf.indexOf("\n\n")) >= 0) {
-      const chunk = buf.slice(0, i);
-      buf = buf.slice(i + 2);
-      const line = chunk.split("\n").find((l) => l.startsWith("data: "));
-      if (line) onEvent(JSON.parse(line.slice(6)));
+  let finished = false;
+  const emit = (e: ProgressEvent) => {
+    if (e.type === "result" || e.type === "error") finished = true;
+    onEvent(e);
+  };
+  try {
+    const res = await fetch("/api/plan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    if (!res.ok || !res.body) {
+      const j = await res.json().catch(() => ({}));
+      emit({ type: "error", message: j.error ?? `Request failed (${res.status})` });
+      return;
     }
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const chunk = buf.slice(0, i);
+        buf = buf.slice(i + 2);
+        const line = chunk.split("\n").find((l) => l.startsWith("data: "));
+        if (line) emit(JSON.parse(line.slice(6)));
+      }
+    }
+  } catch {
+    // Network drop or timeout; reported below.
   }
+  if (!finished) emit({ type: "error", message: "The connection dropped before the run finished. Please try again." });
 }
 
 export async function resolveNames(names: string[], format: Brief["format"]): Promise<{ mode: string; resolutions: Resolution[] } | { error: string }> {
