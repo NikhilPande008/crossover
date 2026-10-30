@@ -143,7 +143,7 @@ See [.env.example](.env.example). Keys stay server-side; the browser never sees 
 
 ### Deployment
 
-Any long-running Node host that supports streaming responses (Render, Railway, Fly, or Vercel with Fluid Compute). Set the env vars in the host's secret store. Recorded preset runs are written to `.data/recorded/` on the server for quota-floor replay and are never committed.
+Any long-running Node host that supports streaming responses (Render, Railway, Fly, or Vercel with Fluid Compute). Set the env vars in the host's secret store. Recorded preset runs are written to `.data/recorded/` on the server for quota-floor replay and are never committed. On Vercel they go to `/tmp`, which lasts only as long as the instance, so replay there is best-effort. The local Ollama provider can't run on a hosted deploy; use `anthropic`, a hosted OpenAI-compatible API, or `none`.
 
 ## API usage, quotas and limitations
 

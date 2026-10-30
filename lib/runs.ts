@@ -73,7 +73,8 @@ export function isRefinementOf(prior: RunResult | undefined, compIds: string[]):
 
 // ---- recorded runs ----
 
-const DIR = join(process.cwd(), ".data", "recorded");
+// Vercel's filesystem is read-only except /tmp, which lasts only as long as the instance.
+const DIR = process.env.VERCEL ? join("/tmp", "crossover", "recorded") : join(process.cwd(), ".data", "recorded");
 
 export function recordPreset(presetId: string, r: RunResult) {
   if (r.mode !== "live") return;
