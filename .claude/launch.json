@@ -1,6 +1,7 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "crossover", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 3000 }
+    { "name": "crossover", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 3000 },
+    { "name": "crossover-fixture", "runtimeExecutable": "env", "runtimeArgs": ["CROSSOVER_MODE=fixture", "LLM_PROVIDER=none", "npm", "run", "dev", "--", "-p", "3001"], "port": 3001 }
   ]
 }

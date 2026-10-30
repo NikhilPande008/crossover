@@ -530,7 +530,10 @@ function Working({ steps, trace }: { steps: { message: string; calls: number }[]
   const qloo = trace.filter((t) => t.kind === "qloo").length;
   const decisions = trace.filter((t) => t.kind === "decision" || t.kind === "plan" || t.kind === "tool").slice(-6);
   const end = useRef<HTMLDivElement>(null);
-  useEffect(() => end.current?.scrollIntoView({ block: "nearest" }), [trace.length]);
+  // Braces matter: newer Chrome returns a Promise from scrollIntoView, and React would call it as the cleanup.
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: "nearest" });
+  }, [trace.length]);
   return (
     <section className="max-w-3xl pt-6" aria-live="polite">
       <Label>Agent working</Label>
