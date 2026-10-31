@@ -61,6 +61,13 @@ test("preset → plan → evidence → comp swap → brief", async ({ page }) =>
   await page.getByRole("tab", { name: "Without Qloo" }).click();
   await page.getByRole("button", { name: "Show without Qloo" }).click();
   await expect(page.getByText(/Baseline unavailable/)).toBeVisible();
+  // A comp swap made from this tab clears the previous comps' baseline.
+  await page.getByRole("button", { name: "Swap comp" }).click();
+  await page.getByLabel("New comp").fill("Eighth Grade");
+  await page.getByRole("button", { name: "Re-plan" }).click();
+  await expect(page.getByText(/Eighth Grade/).first()).toBeVisible();
+  await expect(page.getByText(/Baseline unavailable/)).toBeHidden();
+  await expect(page.getByRole("button", { name: "Show without Qloo" })).toBeVisible();
 
   // Decision brief, templated and labelled.
   await page.getByRole("tab", { name: "Decision brief" }).click();

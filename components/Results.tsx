@@ -55,7 +55,8 @@ export function Results(props: {
       <div className={cx("mt-6", props.busy && "opacity-60 transition")}>
         {tab === "Concepts" && <Concepts {...props} />}
         {tab === "Audience map" && <AudienceMap {...props} />}
-        {tab === "Without Qloo" && <WithoutQloo result={result} />}
+        {/* Keyed by run: a comp swap must not keep showing the previous comps' baseline. */}
+        {tab === "Without Qloo" && <WithoutQloo key={result.runId} result={result} />}
         {tab === "Decision brief" && <BriefView result={result} />}
         {tab === "Agent trace" && <Trace result={result} />}
       </div>
