@@ -2,7 +2,9 @@
 
 **Find the audience your release can actually reach, and turn it into a launch plan you can defend.**
 
-Crossover is an agent for studio, streamer and label marketers. You give it a release and 2–4 comparable titles ("comps"). It uses Qloo's taste graph to work out where the comps' fans live, what else they love across music, podcasts, TV, film, books and brands, and whether the comps share one audience or split into two. It then proposes three campaign concepts and recommends one. Every partner, market and number links to the Qloo request that produced it.
+Crossover is a release-marketing agent for studio, streamer and record-label marketers. It answers the question every launch starts with, *which comparable title ("comp") should we position against?*, and turns the answer into a launch plan: which cities get the budget, which partners to approach, and which creative angle leads. You give it a release and 2–4 comps; it uses Qloo's taste graph to work out where the comps' fans live, what else they love across music, podcasts, TV, film and brands, and whether the comps share one audience or split into two. It then proposes three campaign concepts and recommends one. Every partner and market in the plan traces back to the Qloo request that produced it.
+
+**Live demo:** https://crossover-murex.vercel.app (click **Prestige horror film** → **Plan campaign**, about 30 s; the live demo uses OpenAI `gpt-4.1-mini`).
 
 > Qloo affinity describes aggregate taste overlap among audiences. It is not a forecast of box office, streams, ticket sales or campaign performance.
 
@@ -19,15 +21,16 @@ Mid-size marketers commit a fixed launch budget to markets, partners and a creat
 
 Crossover is release marketing, not tour routing or sponsorship matching: it starts from the comps a marketer already uses and ends with a launch plan for one release.
 
-## How it works
+## What the agent does
 
-1. **Brief** — title, format, logline, 2–4 comps, regions, budget band, exclusions.
-2. **Confirm comps** — each comp is resolved to a Qloo entity before any expensive call.
-3. **Agent research** — a tool-calling loop chooses which Qloo calls to make (domains, per-comp vs combined signals, recovery when a signal is thin). Code checks evidence sufficiency after every turn and fills gaps. The default coverage is podcasts, music artists, brands and the other screen format (TV shows for a film, films for a series); books and the release's own format are fetched when the agent asks for them.
-4. **Score** — deterministic ranking of partners (weighted mean affinity across comps) and markets (mean heatmap percentile across comps). One audience or two: the share of distinct themes two titles have in common in Qloo's compare analysis (10% or more = one audience), falling back to each comp's own taste tags. Overlap of each comp's own top audience affinities is shown alongside, but it is low (1–7%) for every pair we ran live, so it does not decide the verdict. Taste tags are filtered to story and media tags; Qloo's tag list also contains restaurant, payment and hotel tags.
-5. **Conceive** — three concepts with different levers: market-led, partner-led (bridge), crossover. The model picks partners and markets **by candidate key only**; names always come from Qloo facts.
-6. **Critique** — exclusions, regions and pinned markets enforced in code; near-duplicate concepts replaced.
-7. **Brief** — a recommendation with cited rationale, trade-offs and a "test before you spend" checklist. The recommendation is chosen in code (highest confidence; a tie goes to the bridge concept when most comp pairs share an audience, else to the market-led one), so the same evidence always gives the same pick; the model only argues for it. The results header states it as "Lead with …". A grounding validator removes any sentence with an uncited claim, a number that is not in its cited facts, a quantity in words ("ten times", "twice as", "one in five"), a capitalised name with a word that appears in no known name, a partner, show, artist, brand or city that none of the sentence's own cited facts is about, or a comparison ("higher than", "the strongest", "among the top") that the run's scores contradict. It is a word-level check, not a judge: it does not decide whether cited tags actually support an angle's wording, and a new name built only from words of known names (two tags, say) can still pass.
+1. **Confirm comps before spending research.** The marketer enters a release (title, format, logline, US/UK regions, budget band, exclusions) and 2–4 comps, or opens one of three presets. Each comp is resolved to a Qloo entity and shown for confirmation before any research call; a made-up title gets a "No close match" warning.
+2. **Choose its own research.** An LLM agent runs a bounded tool-calling loop (up to 6 turns). It decides which Qloo calls to make: which partner domains, per-comp or combined signals, which comp pairs to compare. The steps, the agent's reasons and a live Qloo call counter stream to the screen. Default coverage is podcasts, music artists, brands and the other screen format (TV shows for a film, films for a series); books and the release's own format are fetched when the agent asks for them.
+3. **Check its evidence and recover.** After every turn, code checks for missing domains, thin results, unmapped markets and uncompared comp pairs, and makes the recovery calls (for example, combining comps into one signal when per-comp results are thin).
+4. **Score in code, not by the model.** Partners are ranked by weighted mean affinity across the comps, and markets by mean heatmap percentile across the comps. Each comp pair gets a verdict, **"one audience or two?"**: the share of distinct themes the two titles have in common in Qloo's compare analysis (10% or more = one audience), falling back to each comp's own taste tags. Overlap of each comp's own top audience affinities is shown alongside, but it was low (1–7%) for every pair we ran live, so it does not decide the verdict. Taste tags are filtered to story and media tags; Qloo's tag list also contains restaurant, payment and hotel tags. Confidence labels come from comp agreement and affinity strength.
+5. **Propose three concepts with different levers:** market-led, partner-led (bridge both audiences) and crossover into an adjacent fandom. Each has ranked markets, a partner shortlist, a creative angle, a confidence label and the main risk. The model picks partners and markets **by candidate key only**, so every name on a concept comes from a Qloo fact. Exclusions, regions and pinned markets are enforced in code, and near-duplicate concepts are replaced.
+6. **Recommend and justify.** Code picks the recommendation (highest confidence; a tie goes to the bridge concept when most comp pairs share an audience, else to the market-led one), so the same evidence always gives the same pick. The results header states it as **"Lead with …"**. The model writes a cited rationale, trade-offs and a "test before you spend" checklist, whose items may name only partners and markets from the recommended concept. A grounding validator removes any sentence with an uncited claim, a number that is not in its cited facts, a quantity in words ("ten times", "twice as", "one in five"), a capitalised name with a word that appears in no known name, a partner, show, artist, brand or city that none of the sentence's own cited facts is about, a comparison ("higher than", "the strongest", "among the top") that the run's scores contradict, or sensitive-trait language. It is a word-level check, not a judge: it does not decide whether cited tags actually support an angle's wording, and a new name built only from words of known names (two tags, say) can still pass. The brief is printable.
+7. **Re-plan when the marketer changes their mind.** Swap a comp (e.g. Midsommar → Lady Bird), mark a partner "not a fit" or pin a market, and the agent re-plans. A diff banner shows how many markets and partners changed and whether the lead concept changed; **"What moved?"** lists each new item with its evidence.
+8. **Prove the value of Qloo.** The **Without Qloo** tab gives the same model the same brief with no tools, then fact-checks every partner it names against Qloo: does it exist, and does it have measured affinity with these comps' audiences?
 
 ### Evidence model
 
@@ -41,16 +44,22 @@ Confidence labels are computed in code (comp agreement and affinity strength), n
 
 ## How Qloo powers it
 
-| Capability | Endpoint | Used for |
-|---|---|---|
-| Entity search | `GET /search` | Resolve comps; fact-check the no-Qloo baseline |
-| Cross-domain affinities | `GET /v2/insights` `filter.type=urn:entity:{artist,podcast,tv_show,movie,book,brand}` | Partner shortlists with per-comp attribution |
-| Taste tags | `GET /v2/insights` `filter.type=urn:tag` | Creative-angle evidence |
-| Demographics | `GET /v2/insights` `filter.type=urn:demographics` | Aggregate age and gender skew |
-| Heatmap | `GET /v2/insights` `filter.type=urn:heatmap` | Rank cities by fan concentration |
-| Theme compare | `GET /v2/analysis/compare` (`a.signal.interests.entities`, `b.signal.interests.entities`) | Themes two comps share and themes unique to each; the shared share decides one audience or two (live: Hereditary/The Witch 17%, Hereditary/Lady Bird 3%) |
+Qloo's taste graph provides the evidence; the model only plans the research and writes the text.
 
-A full run is about 27–30 Qloo calls. The per-run cap is `QLOO_MAX_CALLS_PER_RUN`: 36 by default, set to 30 on the live demo (its `/api/health` shows the value in use). A comp swap or refinement re-uses still-valid facts and costs about 10 when it reaches the server instance that planned the original run. On a multi-instance host such as Vercel it may land on another instance and become a full run; the diff banner still works because the browser keeps the previous result.
+| Qloo capability | Endpoint | What it decides in Crossover |
+|---|---|---|
+| Entity search | `GET /search` | Which real titles anchor the audience; fact-checks the model-only baseline |
+| Cross-domain affinities | `GET /v2/insights` `filter.type=urn:entity:{podcast,artist,tv_show,movie,brand}` (`book` when the agent asks) | Which partners to approach, attributed to the comp whose audience produced them |
+| Taste tags | `GET /v2/insights` `filter.type=urn:tag` (story and media tags) | Which creative angle the evidence supports |
+| Demographics | `GET /v2/insights` `filter.type=urn:demographics` | Aggregate audience skew (age and gender, group-level only) |
+| Heatmap | `GET /v2/insights` `filter.type=urn:heatmap` | Which US and UK cities get the budget |
+| Theme compare | `GET /v2/analysis/compare` (`a.signal.interests.entities`, `b.signal.interests.entities`) | One audience or two: bridge both comps, or pick a lead (live: Hereditary/The Witch share 17% of themes, Hereditary/Lady Bird 3%) |
+
+- **Every value is traceable.** Each Qloo value is stored with the request that produced it. Clicking any partner or market chip opens an evidence drawer with the exact endpoint and parameters, marked live, recorded or synthetic.
+- **Comp-anchored and attributed.** Partners and markets are measured per comp, so the plan shows which comp's audience each one comes from, and the swap diff shows how the plan changes when the anchor changes.
+- **Measured against the model alone.** See [Testing and evaluation](#testing-and-evaluation) and [docs/eval.md](docs/eval.md).
+
+A full run is about 27–30 Qloo calls. The per-run cap is `QLOO_MAX_CALLS_PER_RUN`: 36 by default, set to 30 on the live demo (its `/api/health` shows the value in use). On Vercel a comp swap or refinement often lands on a different server instance and becomes a full run of about 30 calls; only when it reaches the instance that planned the original run does it re-use the still-valid facts and fetch just what changed. The diff banner works either way, because the browser keeps the previous result.
 
 **What an LLM alone cannot do:** say where *these* comps' fans concentrate, tell whether two comps share an audience, or attribute a partner to a specific comp. The **Without Qloo** tab runs the same model on the same brief with no tools and fact-checks every partner it names against Qloo.
 
@@ -58,11 +67,11 @@ A full run is about 27–30 Qloo calls. The per-run cap is `QLOO_MAX_CALLS_PER_R
 
 1. Open the app and click **Prestige horror film**.
 2. Keep the confirmed comps and click **Plan campaign**. Watch the agent's steps and call counter.
-3. On the recommended concept, click any fact chip (e.g. `F12`) to open the evidence drawer and the exact request.
+3. Read the **Lead with …** line in the header. On the recommended concept, click any fact chip (e.g. `F12`) to open the evidence drawer and the exact request.
 4. Click **Swap comp** (pre-filled: Midsommar → Lady Bird) and **Re-plan**. Read the diff banner; click **What moved?**
 5. Open **Without Qloo**, then **Show without Qloo**.
 6. Open **Decision brief**, then **Print / PDF**.
-7. Negative case: **Plan my own release** with a made-up comp title to see the not-found path.
+7. Negative case: go back, choose **Plan my own release**, and enter a made-up comp title to see the "No close match" path.
 
 ## Architecture
 
