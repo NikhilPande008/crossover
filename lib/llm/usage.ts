@@ -73,7 +73,15 @@ export function usageTotals() {
 
 export class UsageMeter {
   records: UsageRecord[] = [];
-  constructor(private onRecord?: (r: UsageRecord) => void) {}
+  constructor(
+    private onRecord?: (r: UsageRecord) => void,
+    /** Provider notes worth showing in the run trace (e.g. a timed-out attempt that was retried). */
+    private onNote?: (message: string) => void,
+  ) {}
+
+  note(message: string) {
+    this.onNote?.(message);
+  }
 
   record(r: Omit<UsageRecord, "costUsd">) {
     const full: UsageRecord = { ...r, costUsd: costOf(priceFor(r.provider, r.model), r) };

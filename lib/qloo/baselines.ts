@@ -96,6 +96,4 @@ export async function reference(client: QlooClient, format: Format, compIds: str
   return { audience: audience.filter(notComp), controls: controls.filter(notComp) };
 }
 
-export function referenceLabel(format: Format): string {
-  return { film: "a typical moviegoer", series: "a typical TV viewer", album: "a typical music fan", tour: "a typical music fan", special: "a typical comedy fan" }[format] ?? "a typical audience";
-}
+export { referenceLabel } from "@/lib/labels";

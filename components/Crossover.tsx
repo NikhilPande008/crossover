@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { Brief, Comp, ProgressEvent, RunResult, TraceEntry } from "@/lib/types";
+import type { AudienceMap, Brief, Comp, RunResult, TraceEntry } from "@/lib/types";
 import type { Candidate } from "@/lib/qloo/api";
 import { PRESETS, type Preset } from "@/lib/presets";
 import { isCloseMatch } from "@/lib/match";
 import { Badge, Button, Card, Label, cx } from "./ui";
-import { Results } from "./Results";
+import { Results, EarlyAudience } from "./Results";
+import { streamPlan } from "@/lib/client/stream";
 
 type Resolution = { query: string; candidates: Candidate[] };
 type Stage = "landing" | "brief" | "confirm" | "working" | "results";
@@ -14,40 +15,7 @@ type Refinements = { excludedPartners: string[]; pinnedMarkets: string[] };
 
 const EMPTY_BRIEF: Brief = { title: "", format: "film", logline: "", comps: ["", ""], regions: ["US"], budget: "M", exclusions: [] };
 
-/** Never throws: a dropped connection or a stream that ends without a result becomes an error event. */
-export async function streamPlan(body: unknown, onEvent: (e: ProgressEvent) => void) {
-  let finished = false;
-  const emit = (e: ProgressEvent) => {
-    if (e.type === "result" || e.type === "error") finished = true;
-    onEvent(e);
-  };
-  try {
-    const res = await fetch("/api/plan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    if (!res.ok || !res.body) {
-      const j = await res.json().catch(() => ({}));
-      emit({ type: "error", message: j.error ?? `Request failed (${res.status})` });
-      return;
-    }
-    const reader = res.body.getReader();
-    const dec = new TextDecoder();
-    let buf = "";
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      let i;
-      while ((i = buf.indexOf("\n\n")) >= 0) {
-        const chunk = buf.slice(0, i);
-        buf = buf.slice(i + 2);
-        const line = chunk.split("\n").find((l) => l.startsWith("data: "));
-        if (line) emit(JSON.parse(line.slice(6)));
-      }
-    }
-  } catch {
-    // Network drop or timeout; reported below.
-  }
-  if (!finished) emit({ type: "error", message: "The connection dropped before the run finished. Please try again." });
-}
+export { streamPlan };
 
 /** `suggest` marks autocomplete lookups, which the server caps separately from the confirm step. */
 export async function resolveNames(names: string[], format: Brief["format"], suggest = false): Promise<{ mode: string; resolutions: Resolution[] } | { error: string }> {
@@ -70,6 +38,7 @@ export function Crossover() {
   const [error, setError] = useState<string | null>(null);
   const [steps, setSteps] = useState<{ message: string; calls: number }[]>([]);
   const [trace, setTrace] = useState<TraceEntry[]>([]);
+  const [early, setEarly] = useState<{ audience: AudienceMap; comps: Comp[] } | null>(null);
   const [result, setResult] = useState<RunResult | null>(null);
   const [previous, setPrevious] = useState<RunResult | null>(null);
   const [refinements, setRefinements] = useState<Refinements>({ excludedPartners: [], pinnedMarkets: [] });
@@ -104,6 +73,7 @@ export function Crossover() {
     setError(null);
     setSteps([]);
     setTrace([]);
+    setEarly(null);
     let got: RunResult | null = null;
     await streamPlan(
       {
@@ -116,6 +86,7 @@ export function Crossover() {
       (e) => {
         if (e.type === "step") setSteps((s) => [...s, { message: e.message, calls: e.calls }]);
         if (e.type === "trace") setTrace((t) => [...t, e.entry]);
+        if (e.type === "audience") setEarly({ audience: e.audience, comps: e.comps });
         if (e.type === "error") setError(e.message);
         if (e.type === "result") got = e.result;
       },
@@ -188,7 +159,7 @@ export function Crossover() {
         />
       )}
 
-      {stage === "working" && <Working steps={steps} trace={trace} />}
+      {stage === "working" && <Working steps={steps} trace={trace} early={early} format={brief.format} />}
 
       {stage === "results" && result && (
         <Results
@@ -325,8 +296,8 @@ function BriefForm({ brief, setBrief, busy, onBack, onSubmit }: { brief: Brief; 
               <option value="film">Film</option>
               <option value="series">Series</option>
               <option value="album">Album</option>
+              <option value="tour">Tour</option>
               <option value="special">Comedy special</option>
-                <option value="tour">Tour</option>
             </select>
           </label>
           <label className="block text-sm font-medium">
@@ -549,7 +520,17 @@ function Confirm({
   );
 }
 
-function Working({ steps, trace }: { steps: { message: string; calls: number }[]; trace: TraceEntry[] }) {
+function Working({
+  steps,
+  trace,
+  early,
+  format,
+}: {
+  steps: { message: string; calls: number }[];
+  trace: TraceEntry[];
+  early: { audience: AudienceMap; comps: Comp[] } | null;
+  format: Brief["format"];
+}) {
   const calls = steps.at(-1)?.calls ?? 0;
   // Count only requests actually sent: cache hits and failed requests are traced too.
   const qloo = trace.filter((t) => t.kind === "qloo" && /^(live|synthetic) /.test(t.message)).length;
@@ -590,6 +571,7 @@ function Working({ steps, trace }: { steps: { message: string; calls: number }[]
           <div ref={end} />
         </Card>
       )}
+      {early && <EarlyAudience audience={early.audience} comps={early.comps} format={format} />}
     </section>
   );
 }

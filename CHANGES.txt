@@ -1,0 +1,13 @@
+Crossover changes on top of ca354ba (origin/main). Unzip at the repo root; files overwrite in place.
+New files:
+  app/api/mcp/route.ts
+  app/r/[id]/page.tsx
+  components/SharedBrief.tsx
+  components/Viz.tsx
+  lib/client/stream.ts
+  lib/labels.ts
+  scripts/calibrate.ts
+  tests/grounding-live-regressions.test.ts
+  tests/lift.test.ts
+  tests/stream.test.ts
+Modified files: all others listed in the zip.

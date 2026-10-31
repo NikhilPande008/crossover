@@ -17,20 +17,21 @@ Mid-size marketers commit a fixed launch budget to markets, partners and a creat
 - **User:** the marketing lead at a mid-size film distributor, streamer or record label who sets a release's launch plan without a research team. The decision Crossover supports is one they already make: which comp to position against, which cities get the budget, which partners to approach, which angle leads.
 - **Buyer:** that team's head of marketing, paying for a seat per marketer rather than per report, because the value is in re-planning (swap a comp, exclude a partner) during campaign planning. We have no pricing evidence yet; this is the model we would test first.
 - **What we would need to learn:** whether marketers trust a comp-based audience map enough to change a market or partner choice, and whether the "test before you spend" checklist matches how they actually pilot. The evaluation protocol in [docs/eval.md](docs/eval.md) and 3–5 marketer interviews come first.
-- **What's next in the product:** more regions once Qloo location coverage is verified, artist-led presets for album rollouts, more specific brand partners (Qloo's popularity filters were tested and return noise, so this needs a category filter), and an MCP endpoint so other agents can call Crossover.
+- **What's next in the product:** more regions once Qloo location coverage is verified, artist-led presets for album rollouts, more specific brand partners for categories the genre-tag pool misses, and an outcome loop where marketers mark what they ran and how it did (not built yet).
 
 Crossover is release marketing, not tour routing or sponsorship matching: it starts from the comps a marketer already uses and ends with a launch plan for one release.
 
 ## What the agent does
 
-1. **Confirm comps before spending research.** The marketer enters a release (title, format, logline, US/UK regions, budget band, exclusions) and 2–4 comps, or opens one of three presets. Each comp is resolved to a Qloo entity and shown for confirmation before any research call; a made-up title gets a "No close match" warning.
-2. **Choose its own research.** An LLM agent runs a bounded tool-calling loop (up to 6 turns). It decides which Qloo calls to make: which partner domains, per-comp or combined signals, which comp pairs to compare. The steps, the agent's reasons and a live Qloo call counter stream to the screen. Default coverage is podcasts, music artists, brands and the other screen format (TV shows for a film, films for a series); books and the release's own format are fetched when the agent asks for them.
+1. **Confirm comps before spending research.** The marketer enters a release (title, format, logline, US/UK regions, budget band, exclusions) and 2–4 comps, or opens one of four presets (horror film, coming-of-age film, dark-comedy series, comedy special + tour). Each comp is resolved to a Qloo entity and shown for confirmation before any research call; a made-up title gets a "No close match" warning.
+2. **Choose its own research.** An LLM agent runs a bounded tool-calling loop (up to 3 turns, after code has run the default coverage). It decides which Qloo calls to make: which partner domains, per-comp or combined signals, which comp pairs to compare. The steps, the agent's reasons and a live Qloo call counter stream to the screen. Default coverage is podcasts, music artists, brands and the other screen format (TV shows for a film, films for a series); books and the release's own format are fetched when the agent asks for them.
 3. **Check its evidence and recover.** After every turn, code checks for missing domains, thin results, unmapped markets and uncompared comp pairs, and makes the recovery calls (for example, combining comps into one signal when per-comp results are thin).
-4. **Score in code, not by the model.** Partners are ranked by weighted mean affinity across the comps, and markets by mean heatmap percentile across the comps. Each comp pair gets a verdict, **"one audience or two?"**: the share of distinct themes the two titles have in common in Qloo's compare analysis (10% or more = one audience), falling back to each comp's own taste tags. Overlap of each comp's own top audience affinities is shown alongside, but it was low (1–7%) for every pair we ran live, so it does not decide the verdict. Taste tags are filtered to story and media tags; Qloo's tag list also contains restaurant, payment and hotel tags. Confidence labels come from comp agreement and affinity strength.
+4. **Score in code, not by the model, against a typical audience.** Partner candidates come from each comp's top results, a genre-tag signal and the agent's own suggestions. Qloo scores every candidate twice with `filter.results.entities`: for the comps' fans and for a reference audience per format (for film, Avengers: Endgame + Barbie fans). **Lift** is the difference. Partners are ranked by affinity plus 2 × lift, and those with lift ≤ 0 (Tesla, Apple) are listed under **"Generic for any audience"** instead of used. Markets are ranked within each country by fan concentration plus over-index against the reference audience's heatmap, with metro size alongside; cities that over-index for every comp are flagged "broad". Each comp pair gets a verdict, **"one audience or two?"**, from cross-affinity: each comp scored inside the other's audience minus inside the reference audience, using the smaller of the two lifts (≥ 12 points one audience, ≥ 5 adjacent, otherwise different), with two control titles alongside. Taste tags are filtered to story and media tags with no sensitive names. Confidence labels come from comp agreement, affinity strength and distinctiveness.
 5. **Propose three concepts with different levers:** market-led, partner-led (bridge both audiences) and crossover into an adjacent fandom. Each has ranked markets, a partner shortlist, a creative angle, a confidence label and the main risk. The model picks partners and markets **by candidate key only**, so every name on a concept comes from a Qloo fact. Exclusions, regions and pinned markets are enforced in code, and near-duplicate concepts are replaced.
 6. **Recommend and justify.** Code picks the recommendation (highest confidence; a tie goes to the bridge concept when most comp pairs share an audience, else to the market-led one), so the same evidence always gives the same pick. The results header states it as **"Lead with …"**. The model writes a cited rationale, trade-offs and a "test before you spend" checklist, whose items may name only partners and markets from the recommended concept. A grounding validator removes any sentence with an uncited claim, a number that is not in its cited facts, a quantity in words ("ten times", "twice as", "one in five"), a capitalised name with a word that appears in no known name, a partner, show, artist, brand or city that none of the sentence's own cited facts is about, a comparison ("higher than", "the strongest", "among the top") that the run's scores contradict, or sensitive-trait language. It is a word-level check, not a judge: it does not decide whether cited tags actually support an angle's wording, and a new name built only from words of known names (two tags, say) can still pass. The brief is printable.
-7. **Re-plan when the marketer changes their mind.** Swap a comp (e.g. Midsommar → Lady Bird), mark a partner "not a fit" or pin a market, and the agent re-plans. A diff banner shows how many markets and partners changed and whether the lead concept changed; **"What moved?"** lists each new item with its evidence.
-8. **Prove the value of Qloo.** The **Without Qloo** tab gives the same model the same brief with no tools, then fact-checks every partner it names against Qloo: does it exist, and does it have measured affinity with these comps' audiences?
+7. **Audit the comps.** The agent decides which comp to lead with, may suggest a title the comps' fans rank highly as a better comp and flag a weak anchor, and may weight the comps; each decision must cite Qloo evidence and appears in the **Comp audit** card and the trace.
+8. **Re-plan when the marketer changes their mind.** Swap a comp (e.g. Midsommar → Lady Bird), mark a partner "not a fit" or pin a market, and the agent re-plans. Exclusions and pins re-use the previous run's evidence without new research. The city map animates to the new plan, a diff banner shows how many markets and partners changed and whether the lead concept changed, and **"What moved?"** lists each new item with its evidence.
+9. **Prove the value of Qloo.** The **Without Qloo** tab gives the same model the same brief with no tools, then scores every partner it names with the same Qloo lift calls as Crossover's own partners: the model guesses, Qloo measures.
 
 ### Evidence model
 
@@ -53,32 +54,38 @@ Qloo's taste graph provides the evidence; the model only plans the research and 
 | Taste tags | `GET /v2/insights` `filter.type=urn:tag` (story and media tags) | Which creative angle the evidence supports |
 | Demographics | `GET /v2/insights` `filter.type=urn:demographics` | Aggregate audience skew (age and gender, group-level only) |
 | Heatmap | `GET /v2/insights` `filter.type=urn:heatmap` | Which US and UK cities get the budget |
-| Theme compare | `GET /v2/analysis/compare` (`a.signal.interests.entities`, `b.signal.interests.entities`) | One audience or two: bridge both comps, or pick a lead (live: Hereditary/The Witch share 17% of themes, Hereditary/Lady Bird 3%) |
+| Named-entity scoring | `GET /v2/insights` with `filter.results.entities` | Lift: each partner candidate scored for the comps' fans and for a reference audience; each comp scored inside the other comps' audiences (one audience or two) |
+| Genre signal | `GET /v2/insights` `signal.interests.tags` + `filter.popularity.min` | A second partner pool from the comps' own genre tags (live: Black Moon Cosmetics, Manic Panic for horror) |
+| Theme compare | `GET /v2/analysis/compare` | Shared and divergent themes for the creative angle |
 
 - **Every value is traceable.** Each Qloo value is stored with the request that produced it. Clicking any partner or market chip opens an evidence drawer with the exact endpoint and parameters, marked live, recorded or synthetic.
 - **Comp-anchored and attributed.** Partners and markets are measured per comp, so the plan shows which comp's audience each one comes from, and the swap diff shows how the plan changes when the anchor changes.
 - **Measured against the model alone.** See [Testing and evaluation](#testing-and-evaluation) and [docs/eval.md](docs/eval.md).
 
-A full run is about 27–30 Qloo calls. The per-run cap is `QLOO_MAX_CALLS_PER_RUN`: 36 by default, set to 30 on the live demo (its `/api/health` shows the value in use). On Vercel a comp swap or refinement often lands on a different server instance and becomes a full run of about 30 calls; only when it reaches the instance that planned the original run does it re-use the still-valid facts and fetch just what changed. The diff banner works either way, because the browser keeps the previous result.
+A full run is about 40–50 Qloo calls with lift scoring. The per-run cap is `QLOO_MAX_CALLS_PER_RUN` (60 by default; `/api/health` shows the value in use). With the durable store configured, Qloo responses are shared across server instances for 6 hours, so a comp swap fetches only what changed wherever it lands.
 
-**What an LLM alone cannot do:** say where *these* comps' fans concentrate, tell whether two comps share an audience, or attribute a partner to a specific comp. The **Without Qloo** tab runs the same model on the same brief with no tools and fact-checks every partner it names against Qloo.
+**What an LLM alone cannot do:** measure whether a partner is distinctive for these comps or loved by everyone, tell whether two comps share fans, rank cities by over-index for this audience, or score its own ideas. The **Without Qloo** tab runs the same model on the same brief with no tools and fact-checks every partner it names against Qloo.
 
 ## Judge click path
 
 1. Open the app and click **Prestige horror film**.
 2. Keep the confirmed comps and click **Plan campaign**. Watch the agent's steps and call counter.
 3. Read the **Lead with …** line in the header. On the recommended concept, click any fact chip (e.g. `F12`) to open the evidence drawer and the exact request.
-4. Click **Swap comp** (pre-filled: Midsommar → Lady Bird) and **Re-plan**. Read the diff banner; click **What moved?**
-5. Open **Without Qloo**, then **Show without Qloo**.
-6. Open **Decision brief**, then **Print / PDF**.
-7. Negative case: go back, choose **Plan my own release**, and enter a made-up comp title to see the "No close match" path.
+4. Open **Audience map**: the city map, the over-index × size chart, the comp orbit and **Generic for any audience**.
+5. Click **Swap comp** (pre-filled: Midsommar → Lady Bird) and **Re-plan**. The map dots move to the new plan; read the diff banner and click **What moved?**
+6. Open **Without Qloo**, then **Show without Qloo**.
+7. Open **Decision brief**, then **Print / PDF**, or **Share link** in the header for a read-only copy.
+8. Negative case: go back, choose **Plan my own release**, and enter a made-up comp title to see the "No close match" path.
 
 ## Architecture
 
-One Next.js app (App Router, TypeScript) on a long-running Node host. No separate backend, no agent framework, no database.
+One Next.js app (App Router, TypeScript). No separate backend and no agent framework; an optional Redis REST store (Upstash) shares runs, events and Qloo responses across server instances.
 
 ```
-app/api/plan        SSE: runs the agent, streams steps and trace
+app/api/plan        SSE: starts a run (kept alive after a dropped stream), streams steps and trace
+app/api/runs/[id]   stored run; /events resumes a run's stream from an event index
+app/r/[id]          read-only shared brief
+app/api/mcp         MCP tools: plan_release, compare_comps, score_partners
 app/api/resolve     comp → Qloo entity candidates
 app/api/baseline    LLM-only arm + Qloo fact-check
 app/api/health      mode, quota, LLM status
@@ -86,7 +93,9 @@ lib/qloo/           client (X-Api-Key, retries, pacing, quota headers, LRU cache
                     param allowlist, loose response schemas, typed API, synthetic fixtures
 lib/agent/          loop, tools, assess (gaps + recovery), concepts, brief, prompts
 lib/facts/store.ts  Fact store; the LLM sees compact summaries only
-lib/score.ts        pure scoring and confidence
+lib/score.ts        pure scoring (lift, over-index, cross-affinity verdict) and confidence
+lib/store/kv.ts     durable store (Redis REST) with an in-memory fallback
+lib/client/         browser stream client: resume and watchdog
 lib/validate/       grounding validator, constraints, input schemas
 components/         UI
 scripts/plan.ts     CLI end-to-end spike
@@ -157,13 +166,14 @@ See [.env.example](.env.example). Keys stay server-side; the browser never sees 
 | `LLM_PRICE_INPUT_PER_MTOK`, `LLM_PRICE_OUTPUT_PER_MTOK` | — | USD per million tokens, for cost logging of hosted open models |
 | `RUN_WALL_SECONDS` | 60 (240 for Ollama) | Wall-clock budget per run |
 | `QLOO_QUOTA_FLOOR` | `1500` | Below this monthly remaining, live runs pause and presets replay recorded runs. Works only if Qloo sends a monthly-remaining header; `/api/health` lists the quota header names it has seen (`quotaHeadersSeen`) and the value read (`quotaRemaining`) |
-| `QLOO_MAX_CALLS_PER_RUN` | `36` | Hard cap per run |
+| `QLOO_MAX_CALLS_PER_RUN` | `60` | Hard cap per run |
+| `KV_REST_API_URL`, `KV_REST_API_TOKEN` | — | Redis REST store (Upstash from the Vercel Marketplace sets these; `UPSTASH_REDIS_REST_URL`/`_TOKEN` also work). Shares runs (30 days), run events, Qloo responses (6 h), preset recordings and visitor caps across instances; without it they stay in one instance's memory |
 | `LIVE_RUNS_PER_IP_HOUR` | `6` | Per-visitor live-run cap (re-plans get 3×, "Without Qloo" 2×; comp lookups are capped at 30 and autocomplete at 40 per hour) |
 | `TRUSTED_PROXY_HOPS` | `1` | Proxies in front of the app that append to `X-Forwarded-For` (1 for Render, Railway or Vercel); sets which entry is the visitor's IP for the per-visitor caps |
 
 ### Deployment
 
-Any long-running Node host that supports streaming responses (Render, Railway, Fly, or Vercel with Fluid Compute). Set the env vars in the host's secret store. Recorded preset runs are written to `.data/recorded/` on the server for quota-floor replay and are never committed. On Vercel they go to `/tmp`, which lasts only as long as the instance, so replay there is best-effort. The local Ollama provider can't run on a hosted deploy; use `anthropic`, a hosted OpenAI-compatible API, or `none`.
+Any Node host that supports streaming responses (Render, Railway, Fly, or Vercel with Fluid Compute). Set the env vars in the host's secret store. On Vercel, add the Redis store so a resumed stream, a comp swap or a share link works on any instance. Recorded preset runs go to the store and to `.data/recorded/` (or `/tmp` on Vercel); Qloo-derived data lives server-side only and is never committed. The local Ollama provider can't run on a hosted deploy; use `anthropic`, a hosted OpenAI-compatible API, or `none`.
 
 ## API usage, quotas and limitations
 
@@ -172,13 +182,14 @@ Any long-running Node host that supports streaming responses (Render, Railway, F
 - Affinity thresholds in `lib/thresholds.ts` were calibrated on live runs (2026-10-25 and 2026-10-30) for a handful of comps; treat them as provisional for other genres.
 - Location coverage is verified for the US and UK first; other regions are not offered yet.
 - Demographics are aggregate audience skew only. The validator blocks descriptions by sensitive traits, including when a taste tag has a sensitive name.
-- Per-visitor caps, the run store, the response cache and recorded preset runs live in each server instance's memory (or `/tmp`). On a multi-instance host a re-plan can land on a fresh instance and cost a full run.
-- Brand partners still include household-name brands. Qloo's popularity filters were tested and return noise; a brand-category filter is planned after the hackathon.
-- Planned after the hackathon: shared run storage across server instances (so a comp swap on Vercel always re-uses facts) and a semantic check that cited tags support an angle's wording.
+- Without the Redis store, caps, runs, events and the response cache stay in one instance's memory; a resumed stream or share link then works only on that instance.
+- Lift is measured against one reference audience per format, and the verdict thresholds (12 and 5 points) come from a handful of live probes; `npm run calibrate` scores ten hand-labelled pairs to check them.
+- The city map uses schematic outlines and a static metro-population table; it shows where fans concentrate, not campaign reach.
+- Planned after the hackathon: a semantic check that cited tags support an angle's wording.
 
 ## Testing and evaluation
 
-Unit tests cover scoring, constraints, the grounding validator, the Qloo client's retries, time budgets and a fixture-mode end-to-end run (budget, distinct levers, citations, exclusions, comp swap, refinements). CI (`.github/workflows/ci.yml`) runs typecheck, lint, unit tests, a fixture-mode build and the Playwright smoke test with no keys.
+Unit tests cover scoring (lift, over-index, cross-affinity verdict), constraints, the grounding validator (including every sentence quoted from the 2026-10-31 live review), the typed checklist, the stream client's resume and watchdog, the Qloo client's retries, time budgets and a fixture-mode end-to-end run (budget, distinct levers, citations, exclusions, comp swap, refinements). CI (`.github/workflows/ci.yml`) runs typecheck, lint, unit tests, a fixture-mode build and the Playwright smoke test with no keys.
 
 **First evaluation run** (2026-10-31, live demo, `gpt-4.1-mini` for both arms; 4 of 6 fixed briefs completed, one stream dropped and one hit the per-visitor cap). Full table and caveats in [docs/eval.md](docs/eval.md); `npm run eval` reruns it.
 

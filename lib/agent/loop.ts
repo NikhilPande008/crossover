@@ -88,8 +88,9 @@ export async function runPlan(input: PlanInput, emit: (e: ProgressEvent) => void
     emit({ type: "trace", entry });
   };
 
-  const meter = new UsageMeter((r) =>
-    log("llm", `${r.phase} · ${r.model} · ${formatUsage({ ...r, inputTokens: r.inputTokens + r.cacheReadTokens + r.cacheWriteTokens })} · ${(r.ms / 1000).toFixed(1)} s`, r),
+  const meter = new UsageMeter(
+    (r) => log("llm", `${r.phase} · ${r.model} · ${formatUsage({ ...r, inputTokens: r.inputTokens + r.cacheReadTokens + r.cacheWriteTokens })} · ${(r.ms / 1000).toFixed(1)} s`, r),
+    (message) => log("limit", message),
   );
   const client = new QlooClient({
     maxCalls: config.maxCallsPerRun(),

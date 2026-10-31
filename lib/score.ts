@@ -278,7 +278,9 @@ export function demographicSummaries(facts: Fact[], comps: Comp[]) {
     const fs = facts.filter((f) => f.kind === "demographic" && f.compIds[0] === c.entityId);
     return {
       compId: c.entityId,
-      summary: fs.length ? fs.map((f) => f.subject!.name).join(", ") : "No Qloo signal",
+      // Qloo demographics are indexes against the average user, so the top bracket is where the
+      // audience over-indexes most, not where most of it is.
+      summary: fs.length ? fs.map((f) => (f.subject!.type === "age" ? `over-indexes most at ${f.subject!.name.replace(/^age /, "ages ")}` : f.subject!.name)).join("; ") : "No Qloo signal",
       factIds: fs.map((f) => f.id),
     };
   });

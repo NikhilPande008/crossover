@@ -24,8 +24,11 @@ export function EvidenceProvider({ facts, comps, children }: { facts: Fact[]; co
   );
 }
 
-/** Solid chip for retrieved evidence. Click opens the request behind it. */
-export function FactChips({ ids, title, max = 3 }: { ids: string[]; title?: string; max?: number }) {
+/**
+ * Solid chip for retrieved evidence. Click opens every fact behind the row in the drawer; the
+ * row shows at most `max` chips (one by default) and the rest are counted in the chip's label.
+ */
+export function FactChips({ ids, title, max = 1 }: { ids: string[]; title?: string; max?: number }) {
   const { open, facts } = useEvidence();
   const valid = ids.filter((id) => facts.has(id));
   if (!valid.length) return <span className="text-xs text-muted">No Qloo signal</span>;
@@ -37,15 +40,12 @@ export function FactChips({ ids, title, max = 3 }: { ids: string[]; title?: stri
           onClick={() => open(valid, title)}
           className="rounded bg-evidence-bg px-1.5 py-0.5 font-mono text-[11px] font-medium text-evidence hover:ring-1 hover:ring-evidence"
           aria-label={`Open evidence ${id}`}
+          aria-description={valid.length > 1 ? `${valid.length} facts in the drawer` : undefined}
+          title={valid.length > max ? `${valid.length} facts: open all in the evidence drawer` : undefined}
         >
           {id}
         </button>
       ))}
-      {valid.length > max && (
-        <button onClick={() => open(valid, title)} className="font-mono text-[11px] text-evidence hover:underline">
-          +{valid.length - max}
-        </button>
-      )}
     </span>
   );
 }

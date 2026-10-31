@@ -35,6 +35,28 @@ What this shows and does not show:
 - One of five attempted live streams dropped. It needs a server-side check before more runs.
 - Not yet measured: comp sensitivity, refinement responsiveness, the retrospective check and marketer feedback.
 
+## Run 2 — protocol (not run yet)
+
+Fixed before the run, against a build with lift scoring, the cross-affinity verdict and resumable streams. Run it with live Qloo and the durable store configured:
+
+```
+npm run eval -- --reps=3 --swaps --refine
+```
+
+| What | How | Pass / report |
+|---|---|---|
+| Reliability | every plan, swap and refinement goes through the browser's stream client, so a dropped stream is resumed, not failed | completion rate (target: all), resumes after a drop, p95 wall time |
+| Run-to-run variance | each brief run 3 times | partner-list Jaccard with the first run |
+| Comp sensitivity | each comp swapped once (`SWAPS` in `scripts/eval.ts`, fixed before the run), re-planned with `priorRunId` as the UI does | share of the recommended concept's partners and markets that changed; whether the lead changed; median Qloo calls per swap |
+| Refinement responsiveness | exclude the recommended concept's top partner and pin the #8 market | constraints honoured and ≥ 30% of the recommended concept changed |
+| Both arms scored by Qloo | `/api/baseline` scores the model's partners and Crossover's partners with the same lift calls | positive-lift partners per arm, median lift per brief |
+| Generic rate | recommended-concept partners with lift ≤ 0 | target 0 |
+| Specificity | as run 1 | should fall below the model alone's 0.011 |
+
+## Verdict calibration — protocol (not run yet)
+
+`npm run calibrate` (live key, about 50 Qloo calls) scores ten film pairs labelled before the run (`PAIRS` in `scripts/calibrate.ts`: five "one audience", two "adjacent", three "different") with the same code as a run, plus the two control titles for film. Report the printed table here: mutual lift, verdict, agreement with the labels, and whether the controls stay near zero. The labels are judgement, not ground truth; if agreement is low, retune `oneAudienceLift` and `adjacentLift` in `lib/thresholds.ts` on this table and say so.
+
 ## Test set (fixed before the first comparison run)
 
 6 briefs = 3 presets (`lib/presets.ts`) × 2 constraint sets:
@@ -64,12 +86,14 @@ Both arms' partners are checked against Qloo by the same code (`lib/baseline.ts`
 | Verifiability | % named partners that resolve to Qloo entities | A, C | — |
 | Audience grounding | % named partners with measured affinity to the comps' audiences | A, C | — |
 | Specificity | partner-list overlap across briefs with different comps (lower = more specific) | A, C | — |
-| Comp sensitivity | % concept content that changes when one comp is swapped | A, C | — |
+| Comp sensitivity | % of the recommended concept that changes when one comp is swapped (`--swaps`) | C | — |
 | Constraint adherence | exclusion violations | A, C | — |
 | Grounding of prose | % sentences with valid citations; % dropped by validator | C | — |
 | Latency | p50 / p95 full run and comp swap | C | — |
 | API health | Qloo error rate by status; calls per run | C | — |
-| Refinement responsiveness | excluded item absent and ≥30% of top-5 changed | C | — |
+| Refinement responsiveness | excluded item absent, pinned market in every concept, ≥ 30% of the recommended concept changed (`--refine`) | C | — |
+| Partner lift | % of named partners with positive lift vs the reference audience; median lift | A, C | — |
+| Generic rate | % of recommended-concept partners with lift ≤ 0 | C | — |
 
 ## Retrospective sanity check
 

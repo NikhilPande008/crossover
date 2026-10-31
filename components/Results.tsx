@@ -1,13 +1,15 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { BaselineResult, Concept, Domain, RunResult } from "@/lib/types";
+import type { AudienceMap as AudienceMapT, BaselineResult, Comp, Concept, Domain, Format, Overlap, RankedPartner, RunResult, TestType } from "@/lib/types";
 import type { Preset } from "@/lib/presets";
 import { diffRuns } from "@/lib/diff";
 import { THRESHOLDS } from "@/lib/thresholds";
 import { formatUsage } from "@/lib/llm/usage";
 import { Badge, Button, Card, CONFIDENCE_TONE, Label, cx } from "./ui";
 import { EvidenceProvider, FactChips, useEvidence } from "./Evidence";
+import { CompOrbit, LiftStrip, MarketMap, MarketQuadrant } from "./Viz";
+import { liftPoints, referenceLabel } from "@/lib/labels";
 
 type Refinements = { excludedPartners: string[]; pinnedMarkets: string[] };
 
@@ -20,6 +22,38 @@ const LEVER_LABEL = { market: "Market-led", partner: "Partner-led", crossover: "
 const MAX_PINS = 5;
 const MAX_EXCLUDED = 20;
 
+const TEST_LABEL: Record<TestType, string> = {
+  geo_ab: "Market A/B",
+  podcast_host_read: "Podcast host read",
+  artist_social_collab: "Artist collab",
+  screen_cross_promo: "Screen cross-promo",
+  brand_copromo: "Brand co-promo",
+  creative_ab: "Creative A/B",
+};
+
+const compName = (comps: Comp[], id: string) => comps.find((c) => c.entityId === id)?.name ?? id;
+
+/** The ranked-partner row behind a plan partner (for its measured lift), by name and domain. */
+function rankedPartner(audience: AudienceMapT, name: string, domain: string): RankedPartner | undefined {
+  const key = name.toLowerCase();
+  return (audience.partners[domain as Domain] ?? []).find((p) => p.name.toLowerCase() === key);
+}
+
+function LiftBadge({ lift, format }: { lift?: number; format: Format }) {
+  if (lift === undefined) return null;
+  return (
+    <span title={`Qloo affinity for these comps' fans minus affinity for ${referenceLabel(format)}, in points`}>
+      <Badge tone={lift > 0 ? "evidence" : "warn"}>{liftPoints(lift)} vs typical</Badge>
+    </span>
+  );
+}
+
+function verdictLabel(o: Overlap): string {
+  if (o.verdict === "one") return "one audience";
+  if (o.verdict === "adjacent") return "adjacent audiences";
+  return "different audiences";
+}
+
 export function Results(props: {
   result: RunResult;
   previous: RunResult | null;
@@ -30,6 +64,8 @@ export function Results(props: {
   onRefine: (r: Refinements) => void;
   onSwap: (fromId: string, name: string) => void;
   onRelax: (constraint: string, kind: "exclusion" | "not-a-fit") => void;
+  /** Shared brief link: no swaps, refinements or exclusions. */
+  readOnly?: boolean;
 }) {
   const { result } = props;
   const [tab, setTab] = useState<Tab>("Concepts");
@@ -81,7 +117,29 @@ function ModeBanner({ result }: { result: RunResult }) {
   return <Badge tone="evidence">Live Qloo data</Badge>;
 }
 
-function RunHeader({ result, busy, steps, preset, refinements, onRefine, onSwap }: Parameters<typeof Results>[0]) {
+function ShareButton({ runId }: { runId: string }) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  return (
+    <Button
+      variant="quiet"
+      onClick={async () => {
+        const url = `${window.location.origin}/r/${runId}`;
+        const ok = await navigator.clipboard?.writeText(url).then(
+          () => true,
+          () => false,
+        );
+        setState(ok ? "copied" : "failed");
+        if (!ok) window.prompt("Copy this link", url);
+        setTimeout(() => setState("idle"), 2000);
+      }}
+      title="Read-only link to this brief, kept for 30 days"
+    >
+      {state === "copied" ? "Link copied" : "Share link"}
+    </Button>
+  );
+}
+
+function RunHeader({ result, busy, steps, preset, refinements, onRefine, onSwap, readOnly }: Parameters<typeof Results>[0]) {
   const [swapFrom, setSwapFrom] = useState(result.comps.find((c) => c.name === preset?.swap.from)?.entityId ?? result.comps.at(-1)!.entityId);
   const [swapTo, setSwapTo] = useState(preset && result.comps.some((c) => c.name === preset.swap.from) ? preset.swap.to : "");
   const [showSwap, setShowSwap] = useState(false);
@@ -94,6 +152,7 @@ function RunHeader({ result, busy, steps, preset, refinements, onRefine, onSwap 
         </Badge>
         <Badge>{(result.ms / 1000).toFixed(1)} s</Badge>
         {!result.llmUsed && <Badge tone="warn">Written without the language model</Badge>}
+        {readOnly ? <Badge>Shared brief · read-only</Badge> : <ShareButton runId={result.runId} />}
       </div>
       <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">“{result.brief.title}”</h1>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted">
@@ -104,9 +163,11 @@ function RunHeader({ result, busy, steps, preset, refinements, onRefine, onSwap 
             {c.year ? <span className="text-muted"> {c.year}</span> : null}
           </span>
         ))}
-        <Button variant="quiet" onClick={() => setShowSwap((s) => !s)} disabled={busy}>
-          Swap comp
-        </Button>
+        {!readOnly && (
+          <Button variant="quiet" onClick={() => setShowSwap((s) => !s)} disabled={busy}>
+            Swap comp
+          </Button>
+        )}
       </div>
       <LeadLine result={result} />
       {showSwap && (
@@ -135,7 +196,7 @@ function RunHeader({ result, busy, steps, preset, refinements, onRefine, onSwap 
           </Button>
         </form>
       )}
-      {(refinements.excludedPartners.length > 0 || refinements.pinnedMarkets.length > 0) && (
+      {!readOnly && (refinements.excludedPartners.length > 0 || refinements.pinnedMarkets.length > 0) && (
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
           <span className="text-muted">Refinements:</span>
           {refinements.pinnedMarkets.map((m) => (
@@ -161,15 +222,43 @@ function RunHeader({ result, busy, steps, preset, refinements, onRefine, onSwap 
 }
 
 /**
- * The core decision in one line: which comp(s) the recommended concept positions against, and
- * how many comp pairs Qloo's theme compare says share an audience. Built from the run's own data.
+ * The core decision in one line: which comp to lead with (the comp audit), which comps to bridge
+ * to (one or adjacent audience with the lead) and which is a stretch (a different audience).
+ * Falls back to the recommended concept's lead comps when the run has no comp audit.
  */
 function LeadLine({ result }: { result: RunResult }) {
   const { facts } = useEvidence();
   const rec = result.concepts.find((c) => c.id === result.decision.recommendedId);
   if (!rec) return null;
-  const name = (id: string) => result.comps.find((c) => c.entityId === id)?.name ?? id;
+  const name = (id: string) => compName(result.comps, id);
+  const advice = result.audience.advice;
   const pairs = result.audience.overlaps;
+  const measured = pairs.some((o) => o.mutualLift !== undefined);
+  const evidence = pairs.flatMap((o) => o.factIds).filter((id) => (measured ? facts.get(id)?.kind === "cross" : facts.get(id)?.kind === "compare"));
+  if (advice) {
+    const verdictWithLead = (id: string) => pairs.find((o) => (o.a === advice.lead && o.b === id) || (o.b === advice.lead && o.a === id))?.verdict;
+    const others = result.comps.filter((c) => c.entityId !== advice.lead && c.entityId !== advice.drop?.compId);
+    const bridge = others.filter((c) => verdictWithLead(c.entityId) !== "different");
+    const stretch = others.filter((c) => verdictWithLead(c.entityId) === "different");
+    return (
+      <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+        <Badge tone="accent">Lead with</Badge>
+        <b>{name(advice.lead)}</b>
+        <span className="text-muted">
+          {[
+            bridge.length > 0 && `bridge to ${bridge.map((c) => c.name).join(" and ")}`,
+            stretch.length > 0 && `${stretch.map((c) => c.name).join(" and ")} ${stretch.length === 1 ? "is the stretch" : "are stretches"}`,
+            advice.drop && `consider dropping ${name(advice.drop.compId)}`,
+            advice.add && `consider adding ${advice.add.name}`,
+            `${LEVER_LABEL[rec.lever].toLowerCase()} concept recommended`,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
+        {evidence.length > 0 && <FactChips ids={evidence} title="One audience or two?" max={1} />}
+      </div>
+    );
+  }
   const shared = pairs.filter((o) => o.similar).length;
   return (
     <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
@@ -177,11 +266,51 @@ function LeadLine({ result }: { result: RunResult }) {
       <b>{rec.leadComps.map(name).join(" + ")}</b>
       <span className="text-muted">
         · {LEVER_LABEL[rec.lever].toLowerCase()} concept
-        {pairs.length > 0 && ` · ${shared} of ${pairs.length} comp pair${pairs.length === 1 ? "" : "s"} share an audience (Qloo theme overlap)`}
+        {pairs.length > 0 && ` · ${shared} of ${pairs.length} comp pair${pairs.length === 1 ? "" : "s"} share an audience (${measured ? "Qloo cross-affinity" : "Qloo theme overlap"})`}
       </span>
-      {/* The verdict rests on the compare facts (shared vs. one-sided themes), so those are the evidence shown. */}
-      {pairs.length > 0 && <FactChips ids={pairs.flatMap((o) => o.factIds).filter((id) => facts.get(id)?.kind === "compare")} title="One audience or two?" max={1} />}
+      {evidence.length > 0 && <FactChips ids={evidence} title="One audience or two?" max={1} />}
     </div>
+  );
+}
+
+/** Comp audit: the lead comp and why, a title to add and a comp to drop, and any comp weights. */
+function AdviceCard({ result }: { result: RunResult }) {
+  const advice = result.audience.advice;
+  const weights = result.audience.weights;
+  if (!advice && !weights) return null;
+  const name = (id: string) => compName(result.comps, id);
+  return (
+    <Card className="mb-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Label>Comp audit</Label>
+        {advice && <Badge>{advice.by === "agent" ? "agent decision, checked against Qloo" : "computed from Qloo cross-affinity"}</Badge>}
+      </div>
+      <ul className="mt-2 space-y-1.5 text-sm">
+        {advice && (
+          <li>
+            <b>Lead with {name(advice.lead)}.</b> <span className="text-muted">{advice.leadReason}</span>
+          </li>
+        )}
+        {advice?.drop && (
+          <li>
+            <Badge tone="warn">weak anchor</Badge> <b>{name(advice.drop.compId)}</b> <span className="text-muted">{advice.drop.reason}</span> <FactChips ids={advice.drop.factIds} title={`${name(advice.drop.compId)}: weak anchor`} max={1} />
+          </li>
+        )}
+        {advice?.add && (
+          <li>
+            <Badge tone="evidence">suggested comp</Badge> <b>{advice.add.name}</b> <span className="text-muted">{advice.add.reason}</span> <FactChips ids={advice.add.factIds} title={`${advice.add.name}: fans also love`} max={1} />
+          </li>
+        )}
+        {weights && (
+          <li className="text-muted">
+            Comp weights set by the agent:{" "}
+            {Object.entries(weights)
+              .map(([id, w]) => `${name(id)} ×${w}`)
+              .join(", ")}
+          </li>
+        )}
+      </ul>
+    </Card>
   );
 }
 
@@ -223,7 +352,7 @@ function DiffBanner({ before, after }: { before: RunResult; after: RunResult }) 
                   <button className="text-left hover:underline" onClick={() => open(a.factIds, a.name)}>
                     + {a.name} <span className="text-muted">({a.kind})</span>
                   </button>{" "}
-                  <FactChips ids={a.factIds} title={a.name} max={2} />
+                  <FactChips ids={a.factIds} title={a.name} max={1} />
                 </li>
               ))}
             </ul>
@@ -276,11 +405,12 @@ function ConstraintNotice({ result, onRelax, busy }: Pick<Parameters<typeof Resu
   );
 }
 
-function Concepts({ result, refinements, onRefine, onRelax, busy }: Parameters<typeof Results>[0]) {
+function Concepts({ result, refinements, onRefine, onRelax, busy, readOnly }: Parameters<typeof Results>[0]) {
   const rec = result.concepts.find((c) => c.id === result.decision.recommendedId);
   return (
     <section>
-      <ConstraintNotice result={result} onRelax={onRelax} busy={busy} />
+      {!readOnly && <ConstraintNotice result={result} onRelax={onRelax} busy={busy} />}
+      <AdviceCard result={result} />
       <div className="grid gap-4 lg:grid-cols-3">
         {[...result.concepts]
           .sort((a, b) => Number(b.id === rec?.id) - Number(a.id === rec?.id))
@@ -291,7 +421,8 @@ function Concepts({ result, refinements, onRefine, onRelax, busy }: Parameters<t
               result={result}
               recommended={c.id === rec?.id}
               busy={busy}
-              onExclude={refinements.excludedPartners.length < MAX_EXCLUDED ? (name) => onRefine({ ...refinements, excludedPartners: [...refinements.excludedPartners, name] }) : undefined}
+              readOnly={readOnly}
+              onExclude={!readOnly && refinements.excludedPartners.length < MAX_EXCLUDED ? (name) => onRefine({ ...refinements, excludedPartners: [...refinements.excludedPartners, name] }) : undefined}
             />
           ))}
       </div>
@@ -301,7 +432,7 @@ function Concepts({ result, refinements, onRefine, onRelax, busy }: Parameters<t
           <ul className="mt-2 space-y-1 text-sm">
             {result.decision.whyNotOthers.map((w, i) => (
               <li key={i}>
-                {w.text} <FactChips ids={w.factIds} max={2} />
+                {w.text} <FactChips ids={w.factIds} max={1} />
               </li>
             ))}
           </ul>
@@ -312,7 +443,21 @@ function Concepts({ result, refinements, onRefine, onRelax, busy }: Parameters<t
   );
 }
 
-function ConceptCard({ c, result, recommended, onExclude, busy }: { c: Concept; result: RunResult; recommended: boolean; onExclude?: (name: string) => void; busy: boolean }) {
+function ConceptCard({
+  c,
+  result,
+  recommended,
+  onExclude,
+  busy,
+  readOnly,
+}: {
+  c: Concept;
+  result: RunResult;
+  recommended: boolean;
+  onExclude?: (name: string) => void;
+  busy: boolean;
+  readOnly?: boolean;
+}) {
   const name = (id: string) => result.comps.find((x) => x.entityId === id)?.name ?? id;
   return (
     <Card className={cx("flex flex-col gap-4", recommended && "border-accent ring-1 ring-accent")}>
@@ -352,14 +497,17 @@ function ConceptCard({ c, result, recommended, onExclude, busy }: { c: Concept; 
                 {p.name} <span className="text-xs text-muted">{DOMAIN_LABEL[p.domain as Domain] ?? p.domain}</span>
               </span>
               <span className="flex shrink-0 items-center gap-2">
-                <button
-                  className="whitespace-nowrap text-xs text-muted sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100 hover:text-warn disabled:cursor-not-allowed"
-                  disabled={busy || !onExclude}
-                  onClick={() => onExclude?.(p.name)}
-                  title={onExclude ? "Exclude and re-plan" : `Up to ${MAX_EXCLUDED} excluded partners`}
-                >
-                  Not a fit
-                </button>
+                {!readOnly && (
+                  <button
+                    className="whitespace-nowrap text-xs text-muted sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100 hover:text-warn disabled:cursor-not-allowed"
+                    disabled={busy || !onExclude}
+                    onClick={() => onExclude?.(p.name)}
+                    title={onExclude ? "Exclude and re-plan" : `Up to ${MAX_EXCLUDED} excluded partners`}
+                  >
+                    Not a fit
+                  </button>
+                )}
+                <LiftBadge lift={rankedPartner(result.audience, p.name, p.domain)?.lift} format={result.brief.format} />
                 <FactChips ids={p.factIds} title={`${p.name}: audience affinity`} max={1} />
               </span>
             </li>
@@ -369,7 +517,7 @@ function ConceptCard({ c, result, recommended, onExclude, busy }: { c: Concept; 
       <div>
         <Label>Creative angle</Label>
         <p className="mt-1 text-sm">
-          {c.creativeAngle.text} <FactChips ids={c.creativeAngle.factIds} title="Creative angle evidence" max={3} />
+          {c.creativeAngle.text} <FactChips ids={c.creativeAngle.factIds} title="Creative angle evidence" max={1} />
         </p>
       </div>
       {c.hypotheses.length > 0 && (
@@ -400,10 +548,12 @@ function Bar({ value, tone = "evidence" }: { value: number; tone?: "evidence" | 
   );
 }
 
-function AudienceMap({ result, refinements, onRefine, busy }: Parameters<typeof Results>[0]) {
+function AudienceMap({ result, previous, refinements, onRefine, busy, readOnly }: Parameters<typeof Results>[0]) {
   const a = result.audience;
-  const name = (id: string) => result.comps.find((x) => x.entityId === id)?.name ?? id;
+  const name = (id: string) => compName(result.comps, id);
   const domains = (Object.keys(a.partners) as Domain[]).filter((d) => a.partners[d].length);
+  const ref = referenceLabel(result.brief.format);
+  const measuredMarkets = a.markets.some((m) => m.overIndex !== undefined);
   return (
     <section className="space-y-6">
       {a.gaps.length > 0 && (
@@ -411,86 +561,137 @@ function AudienceMap({ result, refinements, onRefine, busy }: Parameters<typeof 
           <b>Evidence gaps:</b> {a.gaps.join("; ")}
         </div>
       )}
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-1">
+      <Card>
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
           <Label>Where fans concentrate</Label>
-          <p className="mt-1 text-xs text-muted">Mean heatmap percentile across comps</p>
-          <ol className="mt-3 space-y-1.5 text-sm">
+          <span className="text-xs text-muted">
+            Dot size: market score. {measuredMarkets ? `Faded: no more concentrated than for ${ref}.` : ""} {previous ? "Dashed rings: before the last change." : ""}
+          </span>
+        </div>
+        <div className="mt-3 grid gap-6 lg:grid-cols-[1fr_minmax(0,22rem)]">
+          <MarketMap markets={a.markets} previous={previous?.audience.markets} countries={result.brief.regions} />
+          <ol className="space-y-1.5 text-sm">
             {a.markets.slice(0, 12).map((m, i) => (
               <li key={m.name} className="flex items-center justify-between gap-2">
                 <span className="truncate">
                   <span className="mr-1 font-mono text-xs text-muted">{i + 1}</span>
                   {m.name} <span className="text-xs text-muted">{m.country}</span>
+                  {m.broad && (
+                    <span title="Over-indexes for every comp: possibly how Qloo's sample is spread rather than this audience. Check before spending.">
+                      {" "}
+                      <Badge tone="warn">broad</Badge>
+                    </span>
+                  )}
                 </span>
                 <span className="flex items-center gap-2">
-                  <Bar value={m.score} tone="accent" />
-                  <button
-                    className={cx("text-xs disabled:cursor-not-allowed", refinements.pinnedMarkets.includes(m.name) ? "text-accent" : "text-muted hover:text-ink")}
-                    disabled={busy || refinements.pinnedMarkets.includes(m.name) || refinements.pinnedMarkets.length >= MAX_PINS}
-                    onClick={() => onRefine({ ...refinements, pinnedMarkets: [...refinements.pinnedMarkets, m.name] })}
-                    title={refinements.pinnedMarkets.length >= MAX_PINS && !refinements.pinnedMarkets.includes(m.name) ? `Up to ${MAX_PINS} pinned markets` : "Pin this market into every concept"}
-                  >
-                    {refinements.pinnedMarkets.includes(m.name) ? "Pinned" : "Pin"}
-                  </button>
+                  {m.overIndex !== undefined ? (
+                    <span className={cx("font-mono text-xs", m.overIndex > 0 ? "text-evidence" : "text-muted")} title={`Concentration percentile minus ${ref}'s percentile for this city`}>
+                      {liftPoints(m.overIndex)}
+                    </span>
+                  ) : (
+                    <Bar value={m.score} tone="accent" />
+                  )}
+                  {!readOnly && (
+                    <button
+                      className={cx("text-xs disabled:cursor-not-allowed", refinements.pinnedMarkets.includes(m.name) ? "text-accent" : "text-muted hover:text-ink")}
+                      disabled={busy || refinements.pinnedMarkets.includes(m.name) || refinements.pinnedMarkets.length >= MAX_PINS}
+                      onClick={() => onRefine({ ...refinements, pinnedMarkets: [...refinements.pinnedMarkets, m.name] })}
+                      title={refinements.pinnedMarkets.length >= MAX_PINS && !refinements.pinnedMarkets.includes(m.name) ? `Up to ${MAX_PINS} pinned markets` : "Pin this market into every concept"}
+                    >
+                      {refinements.pinnedMarkets.includes(m.name) ? "Pinned" : "Pin"}
+                    </button>
+                  )}
                   <FactChips ids={m.factIds} title={`${m.name}: fan concentration`} max={1} />
                 </span>
               </li>
             ))}
             {!a.markets.length && <li className="text-muted">No location signal for these comps</li>}
           </ol>
-        </Card>
-        <Card className="lg:col-span-2">
-          <Label>One audience or two?</Label>
-          <p className="mt-1 text-xs text-muted">
-            The verdict uses the share of themes the two titles have in common in Qloo&apos;s compare analysis. Top-affinity overlap is how many of each comp&apos;s own top audience affinities (podcasts, artists, TV, film, books, brands) the other comp also has.
-          </p>
-          <div className="mt-3 space-y-4">
+        </div>
+        {measuredMarkets && a.markets.some((m) => m.population) && (
+          <div className="mt-5 grid gap-4 border-t border-line pt-4 lg:grid-cols-[minmax(0,26rem)_1fr]">
+            <MarketQuadrant markets={a.markets} />
+            <p className="text-xs text-muted">
+              Over-index is how much more these comps&apos; fans concentrate in a city than {ref}&apos;s do (percentile points, ranked within each country). Metro size is a
+              static census estimate. <b className="text-ink">Efficient</b> cities over-index but are small: cheap places to test. <b className="text-ink">Scale</b> cities
+              over-index and are large: where to expand once a test works.
+            </p>
+          </div>
+        )}
+      </Card>
+      {(result.brief.format === "special" || result.brief.format === "tour") && <TourCities result={result} />}
+      <Card>
+        <Label>One audience or two?</Label>
+        <p className="mt-1 text-xs text-muted">
+          {a.overlaps.some((o) => o.mutualLift !== undefined)
+            ? `Each comp is scored inside the other comp's audience and inside ${ref}'s; the verdict uses the smaller lift. One audience at ${liftPoints(THRESHOLDS.oneAudienceLift)} points or more, adjacent from ${liftPoints(THRESHOLDS.adjacentLift)}, otherwise different. Control titles show what no shared audience looks like.`
+            : "The verdict uses the share of themes the two titles have in common in Qloo's compare analysis."}
+        </p>
+        <div className="mt-3 grid gap-6 lg:grid-cols-[minmax(0,18rem)_1fr]">
+          <CompOrbit comps={result.comps} overlaps={a.overlaps} />
+          <div className="space-y-4">
             {a.overlaps.map((o) => (
               <div key={o.a + o.b}>
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   <b>{name(o.a)}</b> vs <b>{name(o.b)}</b>
-                  <Bar value={o.themeShare} />
-                  <span className="font-mono text-xs" title={`${o.themesCompared} distinct themes compared`}>
-                    {Math.round(o.themeShare * 100)}% of themes shared
-                  </span>
-                  <Badge tone={o.similar ? "evidence" : "warn"}>{o.similar ? "shared audience" : "different audiences"}</Badge>
-                  {o.source === "estimated-from-tags" && <Badge>estimated from taste tags</Badge>}
-                  <span className="text-xs text-muted" title={`Share of ${o.compared} top audience ${o.basis === "audience-affinities" ? "affinities" : "taste tags"} that both comps have`}>
-                    top-affinity overlap {Math.round(o.score * 100)}%
-                  </span>
+                  <Badge tone={o.verdict === "one" ? "evidence" : o.verdict === "adjacent" ? "neutral" : "warn"}>{verdictLabel(o)}</Badge>
+                  {o.mutualLift === undefined && (
+                    <span className="font-mono text-xs" title={`${o.themesCompared} distinct themes compared`}>
+                      {Math.round(o.themeShare * 100)}% of themes shared
+                    </span>
+                  )}
+                  {o.source === "estimated-from-tags" && o.mutualLift === undefined && <Badge>estimated from taste tags</Badge>}
                   <FactChips ids={o.factIds} title={`${name(o.a)} vs ${name(o.b)}`} max={1} />
                 </div>
+                {o.mutualLift !== undefined && (
+                  <ul className="mt-1 space-y-0.5 text-xs text-muted">
+                    <li>
+                      {name(o.b)} inside {name(o.a)}&apos;s audience: <b className="text-ink">{liftPoints(o.liftBinA!)}</b> points vs {ref}
+                      {o.rankBinA ? ` · #${o.rankBinA} title ${name(o.a)} fans love` : ""}
+                    </li>
+                    <li>
+                      {name(o.a)} inside {name(o.b)}&apos;s audience: <b className="text-ink">{liftPoints(o.liftAinB!)}</b> points
+                      {o.rankAinB ? ` · #${o.rankAinB} title ${name(o.b)} fans love` : ""}
+                    </li>
+                    {o.controls && o.controls.length > 0 && (
+                      <li className="opacity-70">
+                        Controls:{" "}
+                        {o.controls
+                          .map((c) => `${c.name} ${c.liftInA !== undefined ? liftPoints(c.liftInA) : "?"} / ${c.liftInB !== undefined ? liftPoints(c.liftInB) : "?"}`)
+                          .join("; ")}
+                      </li>
+                    )}
+                  </ul>
+                )}
                 {o.sharedAudience.length > 0 && (
                   <div className="mt-1 text-xs text-muted">
                     <span className="font-semibold text-ink">Both audiences rank highly:</span> {o.sharedAudience.join(", ")}
                   </div>
                 )}
-                <div className="mt-1 grid gap-2 text-xs text-muted sm:grid-cols-3">
-                  <div>
-                    <span className="font-semibold text-ink">Shared themes{o.source === "estimated-from-tags" ? " (from tags)" : ""}:</span> {o.shared.join(", ") || "—"}
+                {o.shared.length > 0 && (
+                  <div className="mt-1 text-xs text-muted">
+                    <span className="font-semibold text-ink">Shared themes{o.source === "estimated-from-tags" ? " (from tags)" : ""}:</span> {o.shared.join(", ")}
+                    {o.onlyA.length > 0 && (
+                      <>
+                        {" "}
+                        · <span className="font-semibold text-ink">more {name(o.a)}:</span> {o.onlyA.join(", ")}
+                      </>
+                    )}
+                    {o.onlyB.length > 0 && (
+                      <>
+                        {" "}
+                        · <span className="font-semibold text-ink">more {name(o.b)}:</span> {o.onlyB.join(", ")}
+                      </>
+                    )}
                   </div>
-                  <div>
-                    <span className="font-semibold text-ink">More {name(o.a)}:</span> {o.onlyA.join(", ") || "—"}
-                  </div>
-                  <div>
-                    <span className="font-semibold text-ink">More {name(o.b)}:</span> {o.onlyB.join(", ") || "—"}
-                  </div>
-                </div>
+                )}
               </div>
             ))}
           </div>
-          <div className="mt-5">
-            <Label>Audience skew (aggregate)</Label>
-            <ul className="mt-2 space-y-1 text-sm">
-              {a.demographics.map((d) => (
-                <li key={d.compId}>
-                  <b>{name(d.compId)}</b>: {d.summary} <FactChips ids={d.factIds} max={2} />
-                </li>
-              ))}
-            </ul>
-          </div>
-        </Card>
-      </div>
+        </div>
+        <SharedVsUnique result={result} />
+        <Demographics result={result} />
+      </Card>
       <Card>
         <Label>What they love across domains</Label>
         <div className="mt-3 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -500,15 +701,22 @@ function AudienceMap({ result, refinements, onRefine, busy }: Parameters<typeof 
               <ul className="mt-2 space-y-1.5 text-sm">
                 {a.partners[d].slice(0, 6).map((p) => (
                   <li key={p.name} className="flex items-center justify-between gap-2">
-                    <span className="min-w-0 truncate" title={p.name}>
+                    <span className="min-w-0 truncate" title={p.source === "model" ? `${p.name} (suggested by the agent, measured in Qloo)` : p.name}>
                       {p.name}
+                      {p.source === "model" && <span className="text-xs text-muted"> · agent idea</span>}
                     </span>
                     <span className="flex shrink-0 items-center gap-2">
-                      <span className="flex gap-0.5" title={result.comps.map((c) => `${c.name}: ${p.perComp[c.entityId] ?? "no signal"}`).join("\n")}>
-                        {result.comps.map((c) => (
-                          <span key={c.entityId} className="inline-block h-3 w-1.5 rounded-sm bg-evidence" style={{ opacity: Math.max(0.12, p.perComp[c.entityId] ?? 0) }} />
-                        ))}
-                      </span>
+                      {p.lift !== undefined ? (
+                        <span className={cx("font-mono text-xs", p.lift > 0 ? "text-evidence" : "text-warn")} title={`${p.combined} for these fans, ${p.baseline} for ${ref}`}>
+                          {liftPoints(p.lift)}
+                        </span>
+                      ) : (
+                        <span className="flex gap-0.5" title={result.comps.map((c) => `${c.name}: ${p.perComp[c.entityId] ?? "no signal"}`).join("\n")}>
+                          {result.comps.map((c) => (
+                            <span key={c.entityId} className="inline-block h-3 w-1.5 rounded-sm bg-evidence" style={{ opacity: Math.max(0.12, p.perComp[c.entityId] ?? 0) }} />
+                          ))}
+                        </span>
+                      )}
                       <FactChips ids={p.factIds} title={`${p.name}: audience affinity`} max={1} />
                     </span>
                   </li>
@@ -517,16 +725,24 @@ function AudienceMap({ result, refinements, onRefine, busy }: Parameters<typeof 
             </div>
           ))}
         </div>
-        <p className="mt-3 text-xs text-muted">Bars show each comp&apos;s affinity ({result.comps.map((c) => c.name).join(", ")}, in order). Hover for values.</p>
+        <p className="mt-3 text-xs text-muted">
+          {domains.some((d) => a.partners[d].some((p) => p.lift !== undefined))
+            ? `Numbers are lift: Qloo affinity for these comps' fans minus affinity for ${ref}, in points. Partners these fans like no more than everyone else are listed below, not used.`
+            : `Bars show each comp's affinity (${result.comps.map((c) => c.name).join(", ")}, in order). Hover for values.`}
+        </p>
+        <GenericRail result={result} />
       </Card>
       <Card>
         <Label>Taste themes (creative-angle evidence)</Label>
         <div className="mt-3 flex flex-wrap gap-2">
-          {a.tags.slice(0, 16).map((t) => (
-            <span key={t.name} className="inline-flex items-center gap-1 rounded-full border border-line px-2.5 py-1 text-sm">
-              {t.name} <FactChips ids={t.factIds} title={`Tag: ${t.name}`} max={1} />
-            </span>
-          ))}
+          {a.tags.slice(0, 16).map((t) => {
+            const support = result.comps.filter((c) => t.perComp[c.entityId] !== undefined).length;
+            return (
+              <span key={t.name} className="inline-flex items-center gap-1 rounded-full border border-line px-2.5 py-1 text-sm" title={`Supported by ${support} of ${result.comps.length} comps`}>
+                {t.name} <span className="text-xs text-muted">{support}/{result.comps.length}</span> <FactChips ids={t.factIds} title={`Tag: ${t.name}`} max={1} />
+              </span>
+            );
+          })}
         </div>
       </Card>
       <Advanced result={result} />
@@ -534,45 +750,205 @@ function AudienceMap({ result, refinements, onRefine, busy }: Parameters<typeof 
   );
 }
 
+/** Partners left out because these fans like them no more than a typical audience does. */
+function GenericRail({ result }: { result: RunResult }) {
+  const generic = result.audience.generic ?? [];
+  if (!generic.length) return null;
+  const ref = referenceLabel(result.brief.format);
+  return (
+    <details className="mt-4 rounded-xl border border-line px-4 py-3 text-sm">
+      <summary className="cursor-pointer font-medium">
+        Generic for any audience ({generic.length}) <span className="font-normal text-muted">· loved here, and just as much by {ref}</span>
+      </summary>
+      <ul className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-2">
+        {generic.slice(0, 20).map((p) => (
+          <li key={p.domain + p.name} className="flex items-center justify-between gap-2">
+            <span className="min-w-0 truncate">
+              {p.name} <span className="text-xs text-muted">{DOMAIN_LABEL[p.domain]}</span>
+            </span>
+            <span className="flex shrink-0 items-center gap-2 text-xs text-muted">
+              <span className="font-mono">
+                {p.combined?.toFixed(3)} here, {p.baseline?.toFixed(3)} for {ref}
+              </span>
+              <FactChips ids={p.factIds} title={`${p.name}: these fans vs ${ref}`} max={1} />
+            </span>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+/** Of the measured partners, how many each comp's fans love, and how many both or all do. */
+function SharedVsUnique({ result }: { result: RunResult }) {
+  const all = Object.values(result.audience.partners).flat();
+  const comps = result.comps;
+  if (all.length < 4 || comps.length < 2) return null;
+  const STRONG = THRESHOLDS.affinityFloor;
+  const strongFor = (p: RankedPartner) => comps.filter((c) => (p.perComp[c.entityId] ?? 0) >= STRONG).map((c) => c.entityId);
+  const rows = all.map((p) => strongFor(p));
+  const allComps = rows.filter((r) => r.length === comps.length).length;
+  return (
+    <div className="mt-5 border-t border-line pt-4">
+      <Label>Shared vs unique partners</Label>
+      <p className="mt-1 text-xs text-muted">
+        Of {all.length} measured partners, <b className="text-ink">{allComps}</b> are in every comp&apos;s own top results (affinity ≥ {STRONG}).
+      </p>
+      <div className="mt-2 space-y-1">
+        {comps.map((c) => {
+          const mine = rows.filter((r) => r.includes(c.entityId));
+          const shared = mine.filter((r) => r.length > 1).length;
+          const unique = mine.length - shared;
+          const total = all.length || 1;
+          return (
+            <div key={c.entityId} className="flex items-center gap-2 text-xs">
+              <span className="w-32 truncate">{c.name}</span>
+              <span className="flex h-2.5 flex-1 overflow-hidden rounded-full bg-surface-2">
+                <span className="bg-evidence" style={{ width: `${(shared / total) * 100}%` }} title={`${shared} shared with another comp`} />
+                <span className="bg-accent opacity-60" style={{ width: `${(unique / total) * 100}%` }} title={`${unique} only for ${c.name}`} />
+              </span>
+              <span className="w-36 whitespace-nowrap text-right font-mono text-muted">
+                {shared} shared · {unique} own
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const AGE_ORDER = ["24_and_younger", "25_to_29", "30_to_34", "35_to_44", "45_to_54", "55_and_older"];
+const AGE_SHORT: Record<string, string> = { "24_and_younger": "≤24", "25_to_29": "25–29", "30_to_34": "30–34", "35_to_44": "35–44", "45_to_54": "45–54", "55_and_older": "55+" };
+
+/** Age indexes are relative (over/under the average Qloo user), so they are drawn as diverging bars. */
+function Demographics({ result }: { result: RunResult }) {
+  const { facts } = useEvidence();
+  const a = result.audience;
+  if (!a.demographics.length) return null;
+  return (
+    <div className="mt-5 border-t border-line pt-4">
+      <Label>Audience skew (aggregate index, not shares)</Label>
+      <ul className="mt-2 space-y-3 text-sm">
+        {a.demographics.map((d) => {
+          const age = d.factIds.map((id) => facts.get(id)).find((f) => f?.subject?.type === "age");
+          const idx = AGE_ORDER.map((k) => ({ k, v: Number(age?.detail?.[k]) })).filter((x) => Number.isFinite(x.v));
+          const max = Math.max(0.05, ...idx.map((x) => Math.abs(x.v)));
+          return (
+            <li key={d.compId}>
+              <div>
+                <b>{compName(result.comps, d.compId)}</b>: {d.summary} <FactChips ids={d.factIds} max={1} />
+              </div>
+              {idx.length > 0 && (
+                <div className="mt-1 flex items-end gap-1" aria-label="Age index by bracket">
+                  {idx.map(({ k, v }) => (
+                    <div key={k} className="flex w-12 flex-col items-center text-[10px] text-muted" title={`${AGE_SHORT[k]}: index ${v > 0 ? "+" : ""}${v.toFixed(2)}`}>
+                      <div className="relative h-8 w-full">
+                        <span className="absolute inset-x-0 top-1/2 h-px bg-line" />
+                        <span
+                          className={cx("absolute inset-x-2 rounded-sm", v >= 0 ? "bg-evidence" : "bg-warn")}
+                          style={v >= 0 ? { bottom: "50%", height: `${(v / max) * 50}%` } : { top: "50%", height: `${(-v / max) * 50}%` }}
+                        />
+                      </div>
+                      {AGE_SHORT[k]}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+/** For a comedy special or tour: where to premiere (large, over-indexing metros) and the tour routing. */
+function TourCities({ result }: { result: RunResult }) {
+  const ms = result.audience.markets.filter((m) => !m.broad);
+  if (ms.length < 3) return null;
+  const premiere = ms.filter((m) => (m.population ?? 0) >= 4 && (m.overIndex === undefined || m.overIndex > 0)).slice(0, 2);
+  const tour = ms.slice(0, 12);
+  return (
+    <Card>
+      <Label>Premiere screening &amp; tour cities</Label>
+      <p className="mt-1 text-xs text-muted">From the comps&apos; fan concentration{ms.some((m) => m.overIndex !== undefined) ? " and over-index" : ""}; cities that over-index for every comp are left out until checked.</p>
+      <div className="mt-3 grid gap-4 sm:grid-cols-[14rem_1fr]">
+        <div>
+          <div className="text-sm font-semibold">Premiere in</div>
+          <ul className="mt-1 text-sm">
+            {(premiere.length ? premiere : ms.slice(0, 2)).map((m) => (
+              <li key={m.name}>
+                {m.name} {m.population ? <span className="text-xs text-muted">~{m.population}M</span> : null} <FactChips ids={m.factIds} title={`${m.name}: fan concentration`} max={1} />
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <div className="text-sm font-semibold">{tour.length}-city tour, by fan score</div>
+          <ol className="mt-1 gap-x-6 text-sm sm:columns-2">
+            {tour.map((m, i) => (
+              <li key={m.name}>
+                <span className="mr-1 font-mono text-xs text-muted">{i + 1}</span>
+                {m.name} <span className="text-xs text-muted">{m.country}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function Advanced({ result }: { result: RunResult }) {
   const t = THRESHOLDS;
+  const w = result.audience.weights ?? {};
   return (
     <details className="rounded-2xl border border-line bg-surface p-5 text-sm">
       <summary className="cursor-pointer font-semibold">Advanced: how scores are computed</summary>
       <div className="mt-4 grid gap-5 md:grid-cols-2">
         <div>
           <Label>Partner score</Label>
-          <p className="mt-1 font-mono text-xs">score = (1/|C|) · Σ w_c · affinity_c − λ · popularity</p>
-          <p className="mt-1 text-muted">A comp with no signal for a partner contributes zero, so partners loved by every comp rank above partners loved by one.</p>
+          <p className="mt-1 font-mono text-xs">score = affinity(comps&apos; fans) + κ · lift</p>
+          <p className="mt-1 font-mono text-xs">lift = affinity(comps&apos; fans) − affinity({referenceLabel(result.brief.format)})</p>
+          <p className="mt-1 text-muted">
+            Candidates come from each comp&apos;s top results, a genre-tag signal and the agent&apos;s own suggestions; Qloo scores every candidate for both audiences
+            (filter.results.entities). Partners with lift ≤ 0 are left out as generic. Without lift data the score is the weighted mean of per-comp affinity.
+          </p>
           <table className="mt-2 w-full text-xs">
             <tbody>
               {result.comps.map((c) => (
                 <tr key={c.entityId} className="border-t border-line">
                   <td className="py-1">w · {c.name}</td>
-                  <td className="py-1 text-right font-mono">1</td>
+                  <td className="py-1 text-right font-mono">{w[c.entityId] ?? 1}</td>
                 </tr>
               ))}
               <tr className="border-t border-line">
-                <td className="py-1">λ popularity penalty</td>
-                <td className="py-1 text-right font-mono">{t.popularityLambda}</td>
+                <td className="py-1">κ lift weight</td>
+                <td className="py-1 text-right font-mono">{t.liftWeight}</td>
               </tr>
             </tbody>
           </table>
         </div>
         <div>
           <Label>Market score</Label>
-          <p className="mt-1 font-mono text-xs">score = mean over comps of heatmap percentile</p>
-          <p className="mt-1 text-muted">Each comp&apos;s cities are ranked against each other first, so one comp with high raw values cannot dominate.</p>
+          <p className="mt-1 font-mono text-xs">score = concentration + {t.marketLiftWeight} · over-index</p>
+          <p className="mt-1 text-muted">
+            Concentration is the mean heatmap percentile across comps, ranked within each country. Over-index subtracts the reference audience&apos;s percentile.
+          </p>
           <Label>
-            <span className="mt-4 block">Thresholds (provisional until the live API test)</span>
+            <span className="mt-4 block">Thresholds</span>
           </Label>
           <table className="mt-2 w-full text-xs">
             <tbody>
               {[
                 ["Affinity floor for a signal", t.affinityFloor],
                 ["Strong, specific affinity", t.strongAffinity],
-                ["Min. strong results per domain", t.minItemsPerDomain],
-                ["Theme share at which comps count as one audience", t.sharedThemes],
+                ["Lift that counts as distinctive", t.distinctLift],
+                ["Mutual lift for one audience", t.oneAudienceLift],
+                ["Mutual lift for adjacent audiences", t.adjacentLift],
+                ["Over-index that flags a city as broad", t.broadOverIndex],
+                ["Theme share for one audience (fallback)", t.sharedThemes],
                 ["Max. shared partners+markets between concepts", t.maxConceptSimilarity],
                 ["Validator drop share that triggers a rewrite", t.maxDroppedShare],
               ].map(([k, v]) => (
@@ -586,8 +962,8 @@ function Advanced({ result }: { result: RunResult }) {
         </div>
       </div>
       <p className="mt-4 text-xs text-muted">
-        Confidence: high when most items are backed by three or more comps (or one strong, specific signal); medium when backed by at least one comp above the floor; low
-        otherwise or when a recovery fallback was needed.
+        Confidence: high when most items are backed by three or more comps, or by one strong or distinctive signal; medium when backed by at least one comp above the
+        floor; low otherwise or when a recovery fallback was needed.
       </p>
     </details>
   );
@@ -628,23 +1004,73 @@ function WithoutQloo({ result }: { result: RunResult }) {
       </Card>
       {d && !d.error && (
         <div className="mt-4 space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-3">
             <Card>
               <Label>Partners that resolve in Qloo</Label>
               <div className="mt-1 text-3xl font-semibold">{Math.round(d.verifiability * 100)}%</div>
               <p className="text-xs text-muted">of {d.checks.length} partners named by the model alone</p>
             </Card>
-            <Card>
-              <Label>With measured affinity to these comps&apos; audiences</Label>
-              <div className="mt-1 text-3xl font-semibold">{Math.round(d.grounding * 100)}%</div>
-              <p className="text-xs text-muted">appear in Crossover&apos;s Qloo evidence for this run</p>
-            </Card>
+            {d.modelArm && d.crossoverArm && d.modelArm.scored > 0 ? (
+              <>
+                <Card>
+                  <Label>Partners these fans like more than {referenceLabel(result.brief.format)}</Label>
+                  <div className="mt-1 flex items-baseline gap-3">
+                    <span className="text-3xl font-semibold">
+                      {d.crossoverArm.positive}/{d.crossoverArm.scored}
+                    </span>
+                    <span className="text-sm text-muted">
+                      Crossover · model alone {d.modelArm.positive}/{d.modelArm.scored}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted">positive lift, both arms scored by the same Qloo calls</p>
+                </Card>
+                <Card>
+                  <Label>Median lift</Label>
+                  <div className="mt-1 flex items-baseline gap-3">
+                    <span className="text-3xl font-semibold">{d.crossoverArm.medianLift !== null ? liftPoints(d.crossoverArm.medianLift) : "—"}</span>
+                    <span className="text-sm text-muted">Crossover · model alone {d.modelArm.medianLift !== null ? liftPoints(d.modelArm.medianLift) : "—"}</span>
+                  </div>
+                  <p className="text-xs text-muted">points of affinity above a typical audience</p>
+                </Card>
+              </>
+            ) : (
+              <Card>
+                <Label>In Crossover&apos;s top results for these comps</Label>
+                <div className="mt-1 text-3xl font-semibold">{Math.round(d.grounding * 100)}%</div>
+                <p className="text-xs text-muted">of the model&apos;s partners; the rest were not scored in this check</p>
+              </Card>
+            )}
           </div>
+          {d.modelArm && d.modelArm.scored > 0 && (
+            <Card>
+              <Label>Model guesses, Qloo measures</Label>
+              <div className="mt-2">
+                <LiftStrip
+                  rows={[
+                    { label: "Model alone", lifts: d.checks.map((c) => c.lift).filter((x): x is number => typeof x === "number") },
+                    { label: "Crossover", lifts: crossoverLifts(result) },
+                  ]}
+                />
+              </div>
+              <p className="mt-1 text-xs text-muted">Each dot is a named partner; the line is the median. Good model ideas with positive lift also enter Crossover&apos;s own candidate pool.</p>
+            </Card>
+          )}
           <div className="grid gap-4 lg:grid-cols-3">
             {d.concepts.map((c, i) => (
               <Card key={i}>
                 <h3 className="font-semibold">{c.name}</h3>
-                <div className="mt-2 text-sm text-muted">{c.markets.join(", ")}</div>
+                <div className="mt-2 text-sm text-muted">
+                  {c.markets.map((m, j) => {
+                    const pct = d.markets?.find((x) => x.name.toLowerCase() === m.toLowerCase())?.percentile;
+                    return (
+                      <span key={m}>
+                        {j > 0 && ", "}
+                        {m}
+                        {pct !== undefined && <span className="font-mono text-xs" title="Fan-concentration percentile for these comps in this run">{` (${Math.round(pct * 100)}th pct)`}</span>}
+                      </span>
+                    );
+                  })}
+                </div>
                 <ul className="mt-2 space-y-1 text-sm">
                   {c.partners.map((p) => {
                     const chk = d.checks.find((x) => x.name.toLowerCase() === p.name.toLowerCase());
@@ -654,7 +1080,7 @@ function WithoutQloo({ result }: { result: RunResult }) {
                           {p.name} <span className="text-xs text-muted">{DOMAIN_LABEL[p.domain as Domain] ?? p.domain}</span>
                         </span>
                         {chk?.lift !== undefined ? (
-                          <Badge tone={chk.lift > 0 ? "evidence" : "warn"}>{`${chk.lift > 0 ? "+" : "−"}${Math.abs(Math.round(chk.lift * 100))} vs typical`}</Badge>
+                          <LiftBadge lift={chk.lift} format={result.brief.format} />
                         ) : chk?.inCrossoverEvidence ? (
                           <Badge tone="evidence">in our top results</Badge>
                         ) : chk?.resolved ? (
@@ -675,11 +1101,26 @@ function WithoutQloo({ result }: { result: RunResult }) {
             {d.modelArm && d.crossoverArm && d.modelArm.medianLift !== null && d.crossoverArm.medianLift !== null
               ? ` Median lift: model alone ${Math.round(d.modelArm.medianLift * 100)}, Crossover ${Math.round(d.crossoverArm.medianLift * 100)}; positive lift: ${d.modelArm.positive} of ${d.modelArm.scored} vs ${d.crossoverArm.positive} of ${d.crossoverArm.scored}.`
               : " “Not in our top results” means the partner exists in Qloo but was not among this run's top results; it was not scored."}
+            {d.markets?.some((m) => m.percentile !== undefined) && " City percentiles are the comps' fan concentration from this run's heatmaps; cities without one are not in our map."}
           </p>
         </div>
       )}
     </section>
   );
+}
+
+/** Lift of every partner across Crossover's concepts (the arm the baseline check compares with). */
+function crossoverLifts(result: RunResult): number[] {
+  const seen = new Set<string>();
+  const out: number[] = [];
+  for (const p of result.concepts.flatMap((c) => c.partners)) {
+    const key = p.name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const lift = rankedPartner(result.audience, p.name, p.domain)?.lift;
+    if (lift !== undefined) out.push(lift);
+  }
+  return out;
 }
 
 function briefText(result: RunResult) {
@@ -688,6 +1129,7 @@ function briefText(result: RunResult) {
   return [
     `CROSSOVER DECISION BRIEF — "${result.brief.title}"`,
     `Comps: ${result.comps.map((c) => c.name).join(", ")}`,
+    ...(result.audience.advice ? [`Lead comp: ${compName(result.comps, result.audience.advice.lead)}. ${result.audience.advice.leadReason}`] : []),
     ``,
     `RECOMMENDATION: ${rec.name} (${LEVER_LABEL[rec.lever]}, ${rec.confidence} confidence)`,
     `Markets: ${rec.markets.map((m) => m.name).join(", ")}`,
@@ -702,7 +1144,7 @@ function briefText(result: RunResult) {
     ``,
     `HYPOTHESES TO TEST BEFORE SPENDING`,
     ...rec.hypotheses.map((h) => `- ${h}`),
-    ...d.testChecklist.map((t) => `[ ] ${t}`),
+    ...(d.tests?.length ? d.tests.map((t) => `[ ] ${TEST_LABEL[t.type]}: ${t.text}${t.why ? ` (${t.why})` : ""}`) : d.testChecklist.map((t) => `[ ] ${t}`)),
     ``,
     d.disclaimer,
   ].join("\n");
@@ -752,7 +1194,26 @@ function BriefView({ result }: { result: RunResult }) {
           <dt className="text-muted">Markets</dt>
           <dd>{rec.markets.map((m) => m.name).join(", ") || "No location signal"}</dd>
           <dt className="text-muted">Partners</dt>
-          <dd>{rec.partners.map((p) => p.name).join(", ")}</dd>
+          <dd>
+            {rec.partners.map((p, i) => {
+              const lift = rankedPartner(result.audience, p.name, p.domain)?.lift;
+              return (
+                <span key={p.name}>
+                  {i > 0 && ", "}
+                  {p.name}
+                  {lift !== undefined && <span className="font-mono text-xs text-muted"> ({liftPoints(lift)})</span>}
+                </span>
+              );
+            })}
+          </dd>
+          {result.audience.advice && (
+            <>
+              <dt className="text-muted">Lead comp</dt>
+              <dd>
+                {compName(result.comps, result.audience.advice.lead)} <span className="text-muted">— {result.audience.advice.leadReason}</span>
+              </dd>
+            </>
+          )}
           <dt className="text-muted">Creative angle</dt>
           <dd>{rec.creativeAngle.text}</dd>
         </dl>
@@ -762,7 +1223,7 @@ function BriefView({ result }: { result: RunResult }) {
         <ul className="mt-2 space-y-2 text-sm">
           {d.rationale.map((r, i) => (
             <li key={i}>
-              {r.text} <FactChips ids={r.factIds} max={3} />
+              {r.text} <FactChips ids={r.factIds} max={1} />
             </li>
           ))}
         </ul>
@@ -782,13 +1243,24 @@ function BriefView({ result }: { result: RunResult }) {
             <li key={i}>{h}</li>
           ))}
         </ul>
-        <ul className="mt-3 space-y-1 text-sm">
-          {d.testChecklist.map((t, i) => (
-            <li key={i} className="flex gap-2">
-              <span aria-hidden>☐</span>
-              {t}
-            </li>
-          ))}
+        <ul className="mt-3 space-y-1.5 text-sm">
+          {d.tests?.length
+            ? d.tests.map((t, i) => (
+                <li key={i} className="flex gap-2">
+                  <span aria-hidden>☐</span>
+                  <span>
+                    <span className="mr-1 text-[11px] font-semibold uppercase tracking-wider text-muted">{TEST_LABEL[t.type]}</span>
+                    {t.text}
+                    {t.why && <span className="block text-xs text-muted">{t.why}</span>}
+                  </span>
+                </li>
+              ))
+            : d.testChecklist.map((t, i) => (
+                <li key={i} className="flex gap-2">
+                  <span aria-hidden>☐</span>
+                  {t}
+                </li>
+              ))}
         </ul>
       </section>
       <p className="mt-6 border-t border-line pt-4 text-xs text-muted">{d.disclaimer}</p>
@@ -812,7 +1284,7 @@ function Trace({ result }: { result: RunResult }) {
         {rows.map((t, i) => (
           <li key={i} className="flex gap-3 rounded-lg px-2 py-1 hover:bg-surface-2">
             <span className="w-20 shrink-0 text-muted">{new Date(t.at).toLocaleTimeString()}</span>
-            <span className={cx("w-20 shrink-0 uppercase", t.kind === "validator" || t.kind === "error" || t.kind === "limit" ? "text-warn" : t.kind === "decision" || t.kind === "plan" ? "text-accent" : "text-evidence")}>
+            <span className={cx("w-20 shrink-0 uppercase", t.kind === "validator" || t.kind === "error" || t.kind === "limit" ? "text-warn" : t.kind === "decision" || t.kind === "plan" || t.kind === "critic" ? "text-accent" : "text-evidence")}>
               {t.kind}
             </span>
             <span className="break-words">{t.message}</span>
@@ -820,5 +1292,62 @@ function Trace({ result }: { result: RunResult }) {
         ))}
       </ol>
     </section>
+  );
+}
+
+/**
+ * First results while concepts are still being written: the audience map arrives as soon as the
+ * research is measured (an "audience" progress event). Rendered outside the evidence drawer.
+ */
+export function EarlyAudience({ audience, comps, format }: { audience: AudienceMapT; comps: Comp[]; format: Format }) {
+  const top = (Object.keys(audience.partners) as Domain[])
+    .flatMap((d) => audience.partners[d].slice(0, 2))
+    .sort((a, b) => (b.lift ?? b.score) - (a.lift ?? a.score))
+    .slice(0, 8);
+  const name = (id: string) => compName(comps, id);
+  return (
+    <Card className="mt-6">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <Label>First results</Label>
+        <span className="text-xs text-muted">The audience is measured; the concepts are being written.</span>
+      </div>
+      <div className="mt-3 grid items-center gap-5 md:grid-cols-[1fr_16rem]">
+        <MarketMap markets={audience.markets} countries={[...new Set(audience.markets.map((m) => m.country))].filter(Boolean)} top={4} />
+        <div className="space-y-3 text-sm">
+          {audience.advice && (
+            <div>
+              <Badge tone="accent">Lead with</Badge> <b>{name(audience.advice.lead)}</b>
+              {audience.advice.add && <div className="mt-1 text-xs text-muted">Suggested comp: {audience.advice.add.name}</div>}
+              {audience.advice.drop && <div className="mt-1 text-xs text-muted">Weak anchor: {name(audience.advice.drop.compId)}</div>}
+            </div>
+          )}
+          {audience.overlaps.length > 0 && (
+            <ul className="space-y-0.5 text-xs">
+              {audience.overlaps.map((o) => (
+                <li key={o.a + o.b}>
+                  {name(o.a)} / {name(o.b)}: <b>{verdictLabel(o)}</b>
+                  {o.mutualLift !== undefined && <span className="text-muted"> ({liftPoints(o.mutualLift)})</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+          {top.length > 0 && (
+            <div>
+              <div className="text-xs font-semibold">Partners {top.some((p) => p.lift !== undefined) ? `by lift vs ${referenceLabel(format)}` : "so far"}</div>
+              <ul className="mt-1 space-y-0.5 text-xs">
+                {top.map((p) => (
+                  <li key={p.domain + p.name} className="flex justify-between gap-2">
+                    <span className="truncate">
+                      {p.name} <span className="text-muted">{DOMAIN_LABEL[p.domain]}</span>
+                    </span>
+                    {p.lift !== undefined && <span className="font-mono text-evidence">{liftPoints(p.lift)}</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      </div>
+    </Card>
   );
 }

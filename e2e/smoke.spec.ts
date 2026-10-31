@@ -16,7 +16,7 @@ test("preset → plan → evidence → comp swap → brief", async ({ page }) =>
   // Results: three concepts, one recommended, disclaimer present.
   await expect(page.getByRole("heading", { name: "“The Tithe”", level: 1 })).toBeVisible();
   await expect(page.getByText("Recommended", { exact: true })).toHaveCount(1);
-  for (const lever of ["Market-led", "Partner-led", "Crossover"]) await expect(page.getByText(lever, { exact: true }).first()).toBeVisible();
+  for (const lever of ["Market-led", "Partner-led", "Expansion"]) await expect(page.getByText(lever, { exact: true }).first()).toBeVisible();
   await expect(page.getByText(/not a forecast of box office/).first()).toBeVisible();
   // Exclusion "alcohol" removed the synthetic alcohol brands.
   await expect(page.getByText(/removed \d+ partner candidate/)).toBeVisible();
@@ -55,7 +55,8 @@ test("preset → plan → evidence → comp swap → brief", async ({ page }) =>
   await page.getByRole("tab", { name: "Audience map" }).click();
   await expect(page.getByText("One audience or two?")).toBeVisible();
   await page.getByText("Advanced: how scores are computed").click();
-  await expect(page.getByText(/score = \(1\/\|C\|\)/)).toBeVisible();
+  await expect(page.getByText(/score = affinity\(comps/)).toBeVisible();
+  await expect(page.getByText(/Generic for any audience/)).toBeVisible();
 
   // Without Qloo: no LLM configured in the smoke env, so it must say so rather than fake it.
   await page.getByRole("tab", { name: "Without Qloo" }).click();

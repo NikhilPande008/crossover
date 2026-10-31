@@ -153,6 +153,7 @@ export class OpenAICompatibleLLM implements LLM {
       const timedOut = e instanceof Error && (e.name === "TimeoutError" || /timed? ?out/i.test(e.message));
       if (!timedOut || m.signal?.aborted || (m.deadline && m.deadline - Date.now() < 8_000)) throw e;
       console.warn("[llm-timeout] retrying once");
+      m.meter?.note(`llm-timeout: ${m.phase ?? "model"} call got no answer within ${Math.round((m.maxMs ?? this.timeoutMs) / 1000)} s; retrying once at temperature 0`);
       return this.post(body, m);
     }
   }

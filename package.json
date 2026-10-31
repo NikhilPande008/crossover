@@ -14,7 +14,8 @@
     "e2e": "playwright test",
     "ollama:setup": "ollama create crossover-gpt-oss -f ollama/Modelfile",
     "revalidate": "node --import tsx scripts/revalidate.ts",
-    "eval": "node --import tsx scripts/eval.ts"
+    "eval": "node --import tsx scripts/eval.ts",
+    "calibrate": "node --env-file-if-exists=.env --env-file-if-exists=.env.local --import tsx scripts/calibrate.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",

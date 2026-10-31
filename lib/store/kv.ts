@@ -34,8 +34,14 @@ async function rest(cmds: Cmd[]): Promise<unknown[]> {
 // ---- memory fallback (also a read-through cache in front of the REST store) ----
 
 type Entry = { v: string; exp: number };
-const mem = new Map<string, Entry>();
-const lists = new Map<string, { items: string[]; exp: number }>();
+// On globalThis: route handlers and pages are bundled separately, and each bundle would
+// otherwise get its own copy, so a share-link page could not see a run its API just saved.
+type List = { items: string[]; exp: number };
+type MemStore = { mem: Map<string, Entry>; lists: Map<string, List> };
+const g = globalThis as { __crossoverKv?: MemStore };
+const shared: MemStore = (g.__crossoverKv ??= { mem: new Map(), lists: new Map() });
+const mem = shared.mem;
+const lists = shared.lists;
 const MEM_MAX = 3000;
 
 function memGet(key: string): string | undefined {
