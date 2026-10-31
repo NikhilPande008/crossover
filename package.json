@@ -9,7 +9,7 @@
     "lint": "eslint",
     "plan": "node --env-file-if-exists=.env --env-file-if-exists=.env.local --import tsx scripts/plan.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "next typegen && tsc --noEmit",
     "api-test": "node --env-file-if-exists=.env --env-file-if-exists=.env.local --import tsx scripts/api-test.ts",
     "e2e": "playwright test",
     "ollama:setup": "ollama create crossover-gpt-oss -f ollama/Modelfile",
