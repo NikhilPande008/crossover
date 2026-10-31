@@ -15,7 +15,7 @@ import { describeLLMError } from "@/lib/llm/budget";
 import { UsageMeter, formatUsage } from "@/lib/llm/usage";
 import { buildAudienceMap } from "@/lib/score";
 import { THRESHOLDS } from "@/lib/thresholds";
-import { makeContext, stripCitations, validateCited, validateUncited, type GroundingContext } from "@/lib/validate/grounding";
+import { makeContext, namedSubjects, stripCitations, validateCited, validateUncited, type GroundingContext } from "@/lib/validate/grounding";
 import { buildScoreScope } from "@/lib/validate/comparative";
 import type { Refinements } from "@/lib/validate/constraints";
 import { assessEvidence, attemptKey, describeGap, gapToCall, type Attempted, type PlannedCall } from "./assess";
@@ -406,10 +406,16 @@ function groundBrief(
       }
       return [{ text: tidy(it.text, g), factIds: r.factIds }];
     });
-  const plain = (items: string[]) =>
+  // Checklist items test the recommended plan, so the partners and cities they name must be in it.
+  const inPlan = new Set([...rec.partners, ...rec.markets].map((x) => x.name.toLowerCase()));
+  const outsidePlan = (t: string) => {
+    const other = namedSubjects(stripCitations(t, g.known), g).find((s) => !inPlan.has(s.name.toLowerCase()));
+    return other ? { text: t, reason: `names "${other.name}", which is not in the recommended concept` } : null;
+  };
+  const plain = (items: string[], extra?: (t: string) => { text: string; reason: string } | null) =>
     items.filter((t) => {
       total++;
-      const issue = validateUncited(t, g);
+      const issue = validateUncited(t, g) ?? extra?.(t) ?? null;
       if (issue) {
         dropped++;
         log("validator", `Dropped: ${issue.reason} — ${JSON.stringify(t.slice(0, 120))}`);
@@ -421,7 +427,7 @@ function groundBrief(
     rationale: cited(d.rationale),
     whyNotOthers: cited(d.whyNotOthers),
     tradeoffs: plain(d.tradeoffs),
-    testChecklist: plain(d.testChecklist),
+    testChecklist: plain(d.testChecklist, outsidePlan),
     disclaimer: DISCLAIMER,
     writtenBy: "llm",
     droppedSentences: dropped,

@@ -62,7 +62,7 @@ Rules (enforced by a validator in code; violations are deleted):
 - rationale: two to four sentences on why the recommended concept is the right call, each citing at least one fact ID from the evidence in factIds. Each sentence must be an interpretation of those facts.
 - whyNotOthers: one sentence per non-recommended concept, each citing fact IDs.
 - tradeoffs: two or three short items.
-- testChecklist: three to five concrete, cheap tests to run before committing budget (e.g. a small paid test comparing two markets, a pilot podcast read).
+- testChecklist: three to five concrete, cheap tests to run before committing budget (e.g. a small paid test comparing two markets, a pilot podcast read). Each test may name only partners and markets listed in the recommended concept, exactly as written; never invent related entities ("fan podcasts", events, communities).
 - Write no numerals. Name only entities that appear in the concepts, facts, comps or brief.
 - Never describe audiences by sensitive traits. Never forecast box office, streams, ticket sales or ROI.
 
