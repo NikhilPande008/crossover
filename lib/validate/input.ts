@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { REGIONS } from "@/lib/geo/cities";
+import { PRESETS } from "@/lib/presets";
 
 // Qloo rule: never send personal data. Comp names go to Qloo search, so reject
 // anything that looks like an email, phone number or URL.
@@ -33,15 +34,22 @@ export const PlanRequest = z.object({
   brief: BriefSchema,
   comps: z.array(CompSchema).min(2).max(4),
   refinements: z
-    .object({ excludedPartners: z.array(name).max(20).default([]), pinnedMarkets: z.array(name).max(5).default([]) })
+    // Partner names come from Qloo and can be long; the UI enforces the same counts.
+    .object({ excludedPartners: z.array(z.string().trim().min(1).max(300)).max(20).default([]), pinnedMarkets: z.array(name).max(5).default([]) })
     .default({ excludedPartners: [], pinnedMarkets: [] }),
   priorRunId: z.string().max(64).optional(),
-  presetId: z.string().max(64).optional(),
+  // Only known preset ids: the id becomes a file name for recorded runs.
+  presetId: z
+    .string()
+    .refine((id) => PRESETS.some((p) => p.id === id), "Unknown preset")
+    .optional(),
 });
 
 export const ResolveRequest = z.object({
   comps: z.array(compName).min(1).max(4),
   format: z.enum(["film", "series", "album", "tour"]),
+  /** Autocomplete lookups, capped separately from the confirm step. */
+  suggest: z.boolean().optional(),
 });
 
 export const EXAMPLE_PLAN_REQUEST = {

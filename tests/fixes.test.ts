@@ -199,11 +199,11 @@ describe("comp match closeness", () => {
 });
 
 describe("creative tag filter", () => {
-  it("keeps story and media tags and drops place, brand and payment tags", async () => {
+  it("keeps story and media tags and drops place, brand and payment tags (invented IDs, real type:domain pairs)", async () => {
     const { isCreativeTag } = await import("@/lib/qloo/api");
-    for (const id of ["urn:tag:plot:qloo:darkly_comedic", "urn:tag:style:qloo:sharp_edged", "urn:tag:keyword:media:stand_up_comedy_special", "urn:tag:archetype:qloo:dysfunctional_family"])
+    for (const id of ["urn:tag:plot:qloo:example_plot", "urn:tag:style:qloo:example_style", "urn:tag:keyword:media:example_keyword", "urn:tag:archetype:qloo:example_archetype"])
       expect(isCreativeTag(id)).toBe(true);
-    for (const id of ["urn:tag:genre:brand:entertainment", "urn:tag:genre:music:indie", "urn:tag:credit_card:place:mastercard", "urn:tag:genre:place:restaurant:gastropub", "urn:tag:backdrop:qloo:mexico_city", "urn:tag:genre:media:classics", "urn:tag:theme:qloo:brand_building", undefined])
+    for (const id of ["urn:tag:genre:brand:example_brand", "urn:tag:genre:music:example_music", "urn:tag:credit_card:place:example_card", "urn:tag:genre:place:example_place:sub", "urn:tag:backdrop:qloo:example_city", "urn:tag:genre:media:example_genre", "urn:tag:theme:qloo:example_theme", undefined])
       expect(isCreativeTag(id)).toBe(false);
   });
 });

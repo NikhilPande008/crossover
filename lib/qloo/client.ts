@@ -41,6 +41,8 @@ const quota = {
   limit: undefined as number | undefined,
   liveCalls: 0,
   errors: {} as Record<string, number>,
+  /** Names (never values) of rate-limit and quota headers Qloo has sent, so /api/health shows what the floor can read. */
+  headersSeen: [] as string[],
 };
 
 export function quotaStatus() {
@@ -68,6 +70,11 @@ export function cacheKey(req: QlooRequest): string {
   return `${req.path}?${sorted}`;
 }
 
+/** Test hook: empty the process-wide response cache, so call counts reflect only this run's own reuse. */
+export function resetQlooCache() {
+  cache.clear();
+}
+
 function readCache(key: string): CacheEntry | undefined {
   const hit = cache.get(key);
   if (!hit) return undefined;
@@ -86,9 +93,11 @@ function writeCache(key: string, entry: CacheEntry) {
 }
 
 function captureQuotaHeaders(h: Headers) {
-  // Header names are unverified; capture any monthly/remaining counters we see.
+  // Header names are unverified; capture any monthly/remaining counters we see. Without one,
+  // quota.remaining stays undefined and the quota floor cannot trigger (see headersSeen).
   for (const [k, v] of h.entries()) {
     const key = k.toLowerCase();
+    if (/limit|remaining|quota|reset/.test(key) && !quota.headersSeen.includes(key) && quota.headersSeen.length < 20) quota.headersSeen.push(key);
     const n = Number(v);
     if (!Number.isFinite(n)) continue;
     if (key.includes("remaining") && (key.includes("month") || key.includes("quota"))) quota.remaining = n;

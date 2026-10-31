@@ -63,3 +63,24 @@ export const PRESETS: Preset[] = [
     swap: { from: "Barry", to: "The Bear" },
   },
 ];
+
+const norm = (xs: string[]) =>
+  xs
+    .map((x) => x.trim().toLowerCase())
+    .sort()
+    .join("|");
+
+/**
+ * True when a brief is exactly the preset's own (title, comps, regions, exclusions). Only such
+ * runs may be recorded for the preset or replayed in its place; a swapped or edited brief may not.
+ */
+export function matchesPreset(id: string, brief: Brief): boolean {
+  const p = PRESETS.find((x) => x.id === id);
+  return (
+    !!p &&
+    brief.title === p.brief.title &&
+    norm(brief.comps) === norm(p.brief.comps) &&
+    norm(brief.regions) === norm(p.brief.regions) &&
+    norm(brief.exclusions) === norm(p.brief.exclusions)
+  );
+}

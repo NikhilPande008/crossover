@@ -3,7 +3,8 @@
 
 import { z } from "zod";
 import type { BaselineCheck, BaselineResult, RunResult } from "@/lib/types";
-import { getLLM } from "@/lib/llm/provider";
+import { getLLM, noteLLM } from "@/lib/llm/provider";
+import { describeLLMError } from "@/lib/llm/budget";
 import { UsageMeter, formatUsage } from "@/lib/llm/usage";
 import { BASELINE_SYSTEM, briefBlock } from "@/lib/agent/prompts";
 import { QlooClient, belowQuotaFloor } from "@/lib/qloo/client";
@@ -36,9 +37,12 @@ export async function runBaseline(run: RunResult): Promise<BaselineResult> {
       effort: "medium",
       meter,
       phase: "baseline",
+      // Leaves time for the Qloo fact-check inside the route's 120 s limit.
+      deadline: Date.now() + 80_000,
     });
   } catch (e) {
-    return { concepts: [], checks: [], verifiability: 0, grounding: 0, error: `Baseline unavailable: ${e instanceof Error ? e.message : e}`, llmUsage: meter.summary() };
+    noteLLM(false, e);
+    return { concepts: [], checks: [], verifiability: 0, grounding: 0, error: `Baseline unavailable: ${describeLLMError(e)}`, llmUsage: meter.summary() };
   }
   const llmUsage = meter.summary();
   console.info(`[llm-usage] baseline run=${run.runId} ${llmUsage.provider} ${llmUsage.models.join(",")} ${formatUsage(llmUsage)}`);

@@ -21,12 +21,15 @@ export function getRun(id: string): RunResult | undefined {
 
 // ---- per-visitor caps (live mode only) ----
 
-export type CapBucket = "run" | "refine" | "resolve" | "baseline";
+export type CapBucket = "run" | "refine" | "resolve" | "suggest" | "baseline";
 
-/** Per-hour limits. Refinements re-use cached facts, so they get a larger, separate budget. */
+/**
+ * Per-hour limits. Refinements re-use cached facts, so they get a larger, separate budget.
+ * Each resolve can spend up to 4 Qloo searches; autocomplete spends 1 per pause in typing.
+ */
 export function capLimit(bucket: CapBucket): number {
   const runs = config.runsPerIpHour();
-  return { run: runs, refine: runs * 3, resolve: 120, baseline: runs * 2 }[bucket];
+  return { run: runs, refine: runs * 3, resolve: 30, suggest: 40, baseline: runs * 2 }[bucket];
 }
 
 const hits = new Map<string, number[]>();
@@ -76,8 +79,11 @@ export function isRefinementOf(prior: RunResult | undefined, compIds: string[]):
 // Vercel's filesystem is read-only except /tmp, which lasts only as long as the instance.
 const DIR = process.env.VERCEL ? join("/tmp", "crossover", "recorded") : join(process.cwd(), ".data", "recorded");
 
+// Preset ids become file names; anything but a plain slug is refused.
+const SAFE_ID = /^[a-z0-9-]{1,64}$/;
+
 export function recordPreset(presetId: string, r: RunResult) {
-  if (r.mode !== "live") return;
+  if (r.mode !== "live" || !SAFE_ID.test(presetId)) return;
   try {
     mkdirSync(DIR, { recursive: true });
     writeFileSync(join(DIR, `${presetId}.json`), JSON.stringify(r));
@@ -87,6 +93,7 @@ export function recordPreset(presetId: string, r: RunResult) {
 }
 
 export function loadRecorded(presetId: string): RunResult | undefined {
+  if (!SAFE_ID.test(presetId)) return undefined;
   const p = join(DIR, `${presetId}.json`);
   if (!existsSync(p)) return undefined;
   try {

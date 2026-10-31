@@ -25,7 +25,7 @@ export const THRESHOLDS = {
   maxDroppedShare: 0.2,
   /**
    * Popularity penalty weight. Tested on a live run (2026-10-30): brand candidates are all at
-   * popularity 0.99–1.00, so λ up to 0.3 leaves Tesla and Apple on top and only promotes items
+   * popularity 0.99–1.00, so λ up to 0.3 leaves the same household-name brands on top and only promotes items
    * with missing popularity (reported as 0). Kept at 0; fixing brand genericness needs a different candidate pool.
    */
   popularityLambda: 0,

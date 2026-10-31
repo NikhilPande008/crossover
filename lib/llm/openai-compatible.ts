@@ -5,6 +5,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import type { LLM, Metering, ToolTurn } from "./provider";
+import { callSignal, callTimeout } from "./budget";
 
 type OAIToolCall = { id: string; type: "function"; function: { name: string; arguments: string } };
 type OAIMessage =
@@ -135,30 +136,31 @@ export class OpenAICompatibleLLM implements LLM {
     this.timeoutMs = o.timeoutMs ?? (o.provider === "ollama" ? 240_000 : 40_000);
   }
 
-  private async post(body: Record<string, unknown>) {
+  private async post(body: Record<string, unknown>, m: Metering) {
     return fetch(`${this.baseUrl}/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json", ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}) },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(this.timeoutMs),
+      signal: callSignal(callTimeout(this.timeoutMs, m.deadline), m.signal),
     });
   }
 
   private async chat(body: Record<string, unknown>, m: Metering): Promise<OAIResponse> {
     const started = Date.now();
     const full: Record<string, unknown> = { model: this.model, temperature: 0, ...(this.reasoningEffort ? { reasoning_effort: this.reasoningEffort } : {}), ...body };
-    let r = await this.post(full);
+    let r = await this.post(full, m);
     if (r.status === 400 && this.reasoningEffort) {
       const text = await r.text().catch(() => "");
       if (/reasoning/i.test(text)) {
         this.reasoningEffort = undefined; // host does not support it; stop sending
         const { reasoning_effort: _drop, ...rest } = full;
         void _drop;
-        r = await this.post(rest);
+        r = await this.post(rest, m);
       } else throw new LLMHttpError(400, `${this.provider} 400: ${text.slice(0, 300)}`);
     }
+    // A plain Error, so the setup hint survives describeLLMError.
     if (r.status === 404 && this.provider === "ollama")
-      throw new LLMHttpError(404, `Ollama has no model "${this.model}". Run \`npm run ollama:setup\` (or \`ollama pull ${this.model}\`).`);
+      throw new Error(`Ollama has no model "${this.model}". Run \`npm run ollama:setup\` (or \`ollama pull ${this.model}\`).`);
     if (!r.ok) throw new LLMHttpError(r.status, `${this.provider} ${r.status}: ${(await r.text().catch(() => "")).slice(0, 300)}`);
     const json = (await r.json()) as OAIResponse;
     // Ollama silently truncates prompts longer than the model's context window, which

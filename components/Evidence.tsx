@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Comp, Fact } from "@/lib/types";
 import { Badge, Button, Label } from "./ui";
 
@@ -57,11 +57,41 @@ function requestUrl(f: Fact) {
 
 function Drawer({ ids, title, facts, comps, onClose }: { ids: string[]; title?: string; facts: Map<string, Fact>; comps: Comp[]; onClose: () => void }) {
   const [copied, setCopied] = useState<string | null>(null);
+  const panel = useRef<HTMLElement>(null);
+  const close = useRef(onClose);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    close.current = onClose;
+  });
+  // Modal behaviour: focus moves into the drawer, Tab stays inside it, Escape closes it, and
+  // focus returns to the chip that opened it. The cleanup is always a function (React 19).
+  useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusables = () => [...(panel.current?.querySelectorAll<HTMLElement>("button, [href], [tabindex]:not([tabindex='-1'])") ?? [])];
+    focusables()[0]?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        close.current();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const els = focusables();
+      if (!els.length) return;
+      const first = els[0];
+      const last = els[els.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      opener?.focus();
+    };
+  }, []);
   const list =ids.map((id) => facts.get(id)).filter((f): f is Fact => !!f);
   const name = (id: string) => comps.find((c) => c.entityId === id)?.name ?? id;
   const copy = async (f: Fact) => {
@@ -71,8 +101,8 @@ function Drawer({ ids, title, facts, comps, onClose }: { ids: string[]; title?: 
   };
   return (
     <div className="fixed inset-0 z-50 flex justify-end print:hidden" role="dialog" aria-modal="true" aria-label="Evidence">
-      <button className="absolute inset-0 bg-black/30" aria-label="Close evidence" onClick={onClose} />
-      <aside className="relative h-full w-full max-w-md overflow-y-auto border-l border-line bg-surface p-5 shadow-2xl">
+      <button className="absolute inset-0 bg-black/30" aria-label="Close evidence" tabIndex={-1} onClick={onClose} />
+      <aside ref={panel} className="relative h-full w-full max-w-md overflow-y-auto border-l border-line bg-surface p-5 shadow-2xl">
         <div className="mb-4 flex items-start justify-between gap-4">
           <div>
             <Label>Evidence</Label>

@@ -10,15 +10,24 @@ Crossover is an agent for studio, streamer and label marketers. You give it a re
 
 Mid-size marketers commit a fixed launch budget to markets, partners and a creative angle with little audience research. The hardest call is usually *which comp to position against*. That choice decides the audience, the cities, the partners and the creative. Today it is settled by gut feel or by repeating the last campaign.
 
+## Who it's for and what's next (hypotheses, not yet tested with buyers)
+
+- **User:** the marketing lead at a mid-size film distributor, streamer or record label who sets a release's launch plan without a research team. The decision Crossover supports is one they already make: which comp to position against, which cities get the budget, which partners to approach, which angle leads.
+- **Buyer:** that team's head of marketing, paying for a seat per marketer rather than per report, because the value is in re-planning (swap a comp, exclude a partner) during campaign planning. We have no pricing evidence yet; this is the model we would test first.
+- **What we would need to learn:** whether marketers trust a comp-based audience map enough to change a market or partner choice, and whether the "test before you spend" checklist matches how they actually pilot. The evaluation protocol in [docs/eval.md](docs/eval.md) and 3–5 marketer interviews come first.
+- **What's next in the product:** more regions once Qloo location coverage is verified, artist-led presets for album rollouts, more specific brand partners (Qloo's popularity filters were tested and return noise, so this needs a category filter), and an MCP endpoint so other agents can call Crossover.
+
+Crossover is release marketing, not tour routing or sponsorship matching: it starts from the comps a marketer already uses and ends with a launch plan for one release.
+
 ## How it works
 
 1. **Brief** — title, format, logline, 2–4 comps, regions, budget band, exclusions.
 2. **Confirm comps** — each comp is resolved to a Qloo entity before any expensive call.
-3. **Agent research** — a tool-calling loop chooses which Qloo calls to make (domains, per-comp vs combined signals, recovery when a signal is thin). Code checks evidence sufficiency after every turn and fills gaps.
+3. **Agent research** — a tool-calling loop chooses which Qloo calls to make (domains, per-comp vs combined signals, recovery when a signal is thin). Code checks evidence sufficiency after every turn and fills gaps. The default coverage is podcasts, music artists, brands and the other screen format (TV shows for a film, films for a series); books and the release's own format are fetched when the agent asks for them.
 4. **Score** — deterministic ranking of partners (weighted mean affinity across comps) and markets (mean heatmap percentile across comps). One audience or two: the share of distinct themes two titles have in common in Qloo's compare analysis (10% or more = one audience), falling back to each comp's own taste tags. Overlap of each comp's own top audience affinities is shown alongside, but it is low (1–7%) for every pair we ran live, so it does not decide the verdict. Taste tags are filtered to story and media tags; Qloo's tag list also contains restaurant, payment and hotel tags.
 5. **Conceive** — three concepts with different levers: market-led, partner-led (bridge), crossover. The model picks partners and markets **by candidate key only**; names always come from Qloo facts.
 6. **Critique** — exclusions, regions and pinned markets enforced in code; near-duplicate concepts replaced.
-7. **Brief** — a recommendation with cited rationale, trade-offs and a "test before you spend" checklist. A grounding validator removes any sentence with an uncited claim, an unknown number, an unknown name, a partner, show, artist, brand or city that none of the sentence's own cited facts is about, or a comparison ("higher than", "the strongest", "among the top") that the run's scores contradict. It does not judge whether cited tags actually support an angle's wording.
+7. **Brief** — a recommendation with cited rationale, trade-offs and a "test before you spend" checklist. The recommendation is chosen in code (highest confidence; a tie goes to the bridge concept when most comp pairs share an audience, else to the market-led one), so the same evidence always gives the same pick; the model only argues for it. The results header states it as "Lead with …". A grounding validator removes any sentence with an uncited claim, a number that is not in its cited facts, a quantity in words ("ten times", "twice as", "one in five"), a capitalised name with a word that appears in no known name, a partner, show, artist, brand or city that none of the sentence's own cited facts is about, or a comparison ("higher than", "the strongest", "among the top") that the run's scores contradict. It is a word-level check, not a judge: it does not decide whether cited tags actually support an angle's wording, and a new name built only from words of known names (two tags, say) can still pass.
 
 ### Evidence model
 
@@ -28,7 +37,7 @@ Mid-size marketers commit a fixed launch budget to markets, partners and a creat
 | Interpretation | LLM, validated | Text with citations |
 | Hypothesis | LLM, labelled | Italic, "Hypothesis — test before spending" |
 
-Confidence labels are computed in code (comp agreement and affinity strength), never by the model.
+Confidence labels are computed in code (comp agreement and affinity strength), never by the model. Agreement counts only per-comp requests: a partner found by one combined request for several comps is evidence, but not evidence that the comps agree.
 
 ## How Qloo powers it
 
@@ -41,7 +50,7 @@ Confidence labels are computed in code (comp agreement and affinity strength), n
 | Heatmap | `GET /v2/insights` `filter.type=urn:heatmap` | Rank cities by fan concentration |
 | Theme compare | `GET /v2/analysis/compare` (`a.signal.interests.entities`, `b.signal.interests.entities`) | Themes two comps share and themes unique to each; the shared share decides one audience or two (live: Hereditary/The Witch 17%, Hereditary/Lady Bird 3%) |
 
-A full run is about 27–30 Qloo calls (hard cap 36). A comp swap or refinement re-uses still-valid facts and costs about 10 when it reaches the server instance that planned the original run. On a multi-instance host such as Vercel it may land on another instance and become a full run; the diff banner still works because the browser keeps the previous result.
+A full run is about 27–30 Qloo calls. The per-run cap is `QLOO_MAX_CALLS_PER_RUN`: 36 by default, set to 30 on the live demo (its `/api/health` shows the value in use). A comp swap or refinement re-uses still-valid facts and costs about 10 when it reaches the server instance that planned the original run. On a multi-instance host such as Vercel it may land on another instance and become a full run; the diff banner still works because the browser keeps the previous result.
 
 **What an LLM alone cannot do:** say where *these* comps' fans concentrate, tell whether two comps share an audience, or attribute a partner to a specific comp. The **Without Qloo** tab runs the same model on the same brief with no tools and fact-checks every partner it names against Qloo.
 
@@ -77,7 +86,7 @@ scripts/api-test.ts API spike: writes shapes and pass/fail to docs/api-findings.
 
 ### Language model
 
-The model plans the research calls and writes the concepts and brief; all retrieval, scoring, confidence and validation are code. Pick a provider with `LLM_PROVIDER`:
+The model plans the research calls and writes the concepts and brief; all retrieval, scoring, confidence and validation are code. Pick a provider with `LLM_PROVIDER`. **The live demo runs `LLM_PROVIDER=openai` with OpenAI `gpt-4.1-mini`**; the results header and `/api/health` name the model in use.
 
 | Provider | What it is | Cost logging |
 |---|---|---|
@@ -88,7 +97,7 @@ The model plans the research calls and writes the concepts and brief; all retrie
 
 The model must support tool calling. Every model call is metered: token counts and cost appear on the results header, in the agent trace (per call), in the CLI output, in server logs (`[llm-usage]`), and as totals since boot at `/api/health`.
 
-If the model is unavailable, Crossover still renders the audience map and ranked markets with templated concepts, labelled "Generated without the writing model".
+Every model call has a time limit inside the run's budget (research ends by `RUN_WALL_SECONDS`; writing ends at most 40 s later, inside the 120 s route limit) and stops when the browser goes away. If the model is unavailable, Crossover still renders the audience map and ranked markets with templated concepts, labelled "Generated without the writing model".
 
 Local open model in one go:
 
@@ -112,11 +121,13 @@ Without `QLOO_API_KEY` the app runs in **fixture mode**: invented entities from 
 
 ```bash
 npm test             # unit + fixture-mode agent tests
+npx playwright install chromium   # once, before the first e2e run
 npm run e2e          # Playwright smoke (desktop + mobile) on a fixture-mode build; no keys used
 npm run plan -- prestige-horror          # CLI run
 npm run plan -- prestige-horror --swap   # with the demo comp swap
 npm run plan -- prestige-horror --save=/tmp/run.json   # keep the full run (Qloo data: outside the repo or under .data/)
 npm run revalidate -- /tmp/run.json      # re-apply the current validator to a saved run
+npm run eval         # arm-vs-arm evaluation (docs/eval.md) against the live demo; ~50 Qloo calls per brief, raw runs to .data/eval/
 npm run api-test     # live API spike (needs QLOO_API_KEY)
 ```
 
@@ -136,9 +147,9 @@ See [.env.example](.env.example). Keys stay server-side; the browser never sees 
 | `LLM_BASE_URL` | Ollama: `http://localhost:11434/v1` | Endpoint for `ollama` / `openai` providers |
 | `LLM_PRICE_INPUT_PER_MTOK`, `LLM_PRICE_OUTPUT_PER_MTOK` | — | USD per million tokens, for cost logging of hosted open models |
 | `RUN_WALL_SECONDS` | 60 (240 for Ollama) | Wall-clock budget per run |
-| `QLOO_QUOTA_FLOOR` | `1500` | Below this monthly remaining, live runs pause and presets replay recorded runs |
+| `QLOO_QUOTA_FLOOR` | `1500` | Below this monthly remaining, live runs pause and presets replay recorded runs. Works only if Qloo sends a monthly-remaining header; `/api/health` lists the quota header names it has seen (`quotaHeadersSeen`) and the value read (`quotaRemaining`) |
 | `QLOO_MAX_CALLS_PER_RUN` | `36` | Hard cap per run |
-| `LIVE_RUNS_PER_IP_HOUR` | `6` | Per-visitor live-run cap |
+| `LIVE_RUNS_PER_IP_HOUR` | `6` | Per-visitor live-run cap (re-plans get 3×, "Without Qloo" 2×; comp lookups are capped at 30 and autocomplete at 40 per hour) |
 | `TRUSTED_PROXY_HOPS` | `1` | Proxies in front of the app that append to `X-Forwarded-For` (1 for Render, Railway or Vercel); sets which entry is the visitor's IP for the per-visitor caps |
 
 ### Deployment
@@ -149,20 +160,30 @@ Any long-running Node host that supports streaming responses (Render, Railway, F
 
 - Observed hackathon limits: about 5 requests/s and 10,000/month per key. The client paces to about 4.5 req/s, backs off on 429 using `x-second-ratelimit-reset`, and caches responses in memory.
 - **Unverified parameters.** Qloo has been reported to ignore invalid parameters silently. Every parameter is allowlisted in `lib/qloo/params.ts`, and filters (e.g. exclusions) are re-asserted in code. Run `npm run api-test` with a key to verify.
-- Affinity thresholds in `lib/thresholds.ts` are provisional until the live API test.
+- Affinity thresholds in `lib/thresholds.ts` were calibrated on live runs (2026-10-25 and 2026-10-30) for a handful of comps; treat them as provisional for other genres.
 - Location coverage is verified for the US and UK first; other regions are not offered yet.
-- Demographics are aggregate audience skew only. The validator blocks descriptions by sensitive traits.
+- Demographics are aggregate audience skew only. The validator blocks descriptions by sensitive traits, including when a taste tag has a sensitive name.
+- Per-visitor caps, the run store, the response cache and recorded preset runs live in each server instance's memory (or `/tmp`). On a multi-instance host a re-plan can land on a fresh instance and cost a full run.
 
 ## Testing and evaluation
 
-Unit tests cover scoring, constraints, the grounding validator and a fixture-mode end-to-end run (budget, distinct levers, citations, exclusions, comp swap, refinements). The arm-vs-arm evaluation protocol is in [docs/eval.md](docs/eval.md); results are reported there only from real runs.
+Unit tests cover scoring, constraints, the grounding validator, the Qloo client's retries, time budgets and a fixture-mode end-to-end run (budget, distinct levers, citations, exclusions, comp swap, refinements). CI (`.github/workflows/ci.yml`) runs typecheck, lint, unit tests, a fixture-mode build and the Playwright smoke test with no keys.
+
+**First evaluation run** (2026-10-31, live demo, `gpt-4.1-mini` for both arms; 4 of 6 fixed briefs completed, one stream dropped and one hit the per-visitor cap). Full table and caveats in [docs/eval.md](docs/eval.md); `npm run eval` reruns it.
+
+| | Model alone (same brief, no Qloo) | Crossover |
+|---|---|---|
+| Named partners that resolve to a Qloo entity | 83% of 59 | all 67, by construction |
+| …with measured affinity to these comps' audiences | 31% | all, by construction |
+| Partner-list overlap between briefs with different comps (lower = more specific) | 0.011 | 0.043 (four music artists shared by two briefs) |
 
 ## Credits
 
 | What | Used for | Terms |
 |---|---|---|
 | [Qloo](https://www.qloo.com) Insights API (hackathon host) | All taste, affinity, heatmap, demographic and compare data | Qloo hackathon terms. No Qloo response data is committed or redistributed here; only synthetic fixtures |
-| [Claude](https://www.anthropic.com/claude) via the Anthropic TypeScript SDK | Default research planner and writer | Anthropic commercial terms; SDK Apache-2.0 |
+| [OpenAI](https://openai.com) `gpt-4.1-mini` via the OpenAI-compatible provider | Research planner and writer on the live demo | OpenAI API terms |
+| [Claude](https://www.anthropic.com/claude) via the Anthropic TypeScript SDK | Default provider in code | Anthropic commercial terms; SDK Apache-2.0 |
 | [gpt-oss](https://ollama.com/library/gpt-oss) via [Ollama](https://ollama.com) (optional) | Local open-weights alternative | Apache-2.0 model weights; Ollama MIT |
 | [Next.js](https://nextjs.org), [React](https://react.dev) | App framework | MIT |
 | [Tailwind CSS](https://tailwindcss.com) | Styling | MIT |

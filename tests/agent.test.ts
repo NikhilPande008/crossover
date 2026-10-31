@@ -2,7 +2,7 @@
 
 import { beforeAll, describe, expect, it } from "vitest";
 import { PRESETS } from "@/lib/presets";
-import { QlooClient } from "@/lib/qloo/client";
+import { QlooClient, resetQlooCache } from "@/lib/qloo/client";
 import { bestCandidate, resolveComps } from "@/lib/agent/resolve";
 import { runPlan } from "@/lib/agent/loop";
 import { diffRuns } from "@/lib/diff";
@@ -54,8 +54,15 @@ describe("agent (fixture mode)", () => {
   it("re-plans a comp swap cheaply, reusing still-valid facts, and the plan changes", async () => {
     const [swapRes] = await resolveComps(new QlooClient({ maxCalls: 2, mode: "fixture" }), [preset.swap.to], preset.compTypes);
     const swapped = comps.map((c) => (c.name === preset.swap.from ? bestCandidate(swapRes)! : c));
+    // Empty the response cache first: otherwise every repeated request is a free cache hit and the
+    // swap looks cheap even if no prior fact were reused.
+    resetQlooCache();
     const next = await runPlan({ brief: preset.brief, comps: swapped, priorFacts: run.facts, mode: "fixture" });
     expect(next.qlooCalls).toBeLessThanOrEqual(10); // only the new comp: 4 domains, tags, 2 regions, demographics, 2 compares
+    expect(next.cachedCalls).toBe(0);
+    resetQlooCache();
+    const fromScratch = await runPlan({ brief: preset.brief, comps: swapped, mode: "fixture" });
+    expect(fromScratch.qlooCalls).toBeGreaterThan(next.qlooCalls + 10);
     const d = diffRuns(run, next);
     expect(d.marketsChanged + d.partnersChanged).toBeGreaterThan(0);
   });

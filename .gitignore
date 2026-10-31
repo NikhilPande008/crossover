@@ -51,3 +51,6 @@ next-env.d.ts
 
 # internal self-assessment (names other entrants; keep out of the public repo)
 /docs/internal/
+
+# demo recordings (show live Qloo results; keep out of the repo)
+/demo/

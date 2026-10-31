@@ -1,6 +1,39 @@
 # Evaluation
 
-Status: **not yet run.** Needs a live Qloo key and an LLM key. Fill this in from real runs only; never estimate.
+Status: **first run on 2026-10-31, 4 of 6 briefs completed.** Results below come from that run only (`npm run eval`, `scripts/eval.ts`); nothing is estimated. Raw runs contain Qloo data and stay in gitignored `.data/eval/`.
+
+## Run 1 — 2026-10-31
+
+Setup: live demo (`https://crossover-murex.vercel.app`, build `6d6eaab`), `gpt-4.1-mini` (OpenAI) for both arms, live Qloo. Arm C is `/api/plan`; arm A is `/api/baseline` on the same brief and comps, fact-checked by the same code. One run per brief.
+
+| # | Brief | Result |
+|---|---|---|
+| 1 | prestige-horror, as preset | completed |
+| 2 | prestige-horror, no exclusions | **failed**: the live stream dropped mid-run (client saw `terminated`); not retried |
+| 3 | indie-coming-of-age, as preset | completed |
+| 4 | indie-coming-of-age, exclusions: alcohol | completed |
+| 5 | dark-comedy-series, as preset | completed |
+| 6 | dark-comedy-series, no exclusions | **not run**: the demo's 6-runs-per-visitor-per-hour cap was reached (one earlier manual run counted) |
+
+n = 4 completed briefs. Small; read as a first look, not a benchmark.
+
+| Metric | Arm A (model alone) | Arm C (Crossover) |
+|---|---|---|
+| Partners named (4 briefs) | 59 | 67 |
+| Verifiability: resolve to a Qloo entity | 83% | 100% by construction (names come from Qloo facts), not a measured result |
+| Audience grounding: measured affinity with these comps' audiences | 31% | 100% by construction |
+| Specificity: mean partner-list overlap (Jaccard) between briefs with different comps, as-preset briefs, 3 pairs (lower = more specific) | 0.011 | 0.043 |
+| Exclusion violations (name match only; a weak check) | 0 | 0 |
+| Wall time per run (median / max) | — | 29.8 s / 29.9 s |
+| Qloo calls per run | — | 5, 27, 0, 30 (the 5 and 0 were mostly served from the server's response cache, filled by earlier runs of the same comps) |
+| Brief written by the model / validator removals | — | 4 of 4 / 6 items removed in total |
+| Recommended lever | — | market ×3, crossover ×1 (build `6d6eaab` let the model choose; the recommendation is now picked in code) |
+
+What this shows and does not show:
+- Without Qloo, about one in six partners the model named does not resolve to any Qloo entity, and fewer than a third have any measured affinity with the comps' audiences. Crossover's partners all do, because they are taken from Qloo results.
+- On specificity Crossover did **not** beat the baseline in this run: its lists overlapped more across briefs. All of the overlap is four music artists shared by the coming-of-age and dark-comedy briefs; the horror brief shared no partner with either.
+- One of five attempted live streams dropped. It needs a server-side check before more runs.
+- Not yet measured: comp sensitivity, refinement responsiveness, the retrospective check and marketer feedback.
 
 ## Test set (fixed before the first comparison run)
 

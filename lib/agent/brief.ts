@@ -8,8 +8,8 @@ export const DISCLAIMER =
   "Qloo affinity describes aggregate taste overlap among audiences. It is not a forecast of box office, streams, ticket sales or campaign performance.";
 
 const Cited = z.object({ text: z.string(), factIds: z.array(z.string()) });
+// The recommendation itself is chosen in code (pickRecommended); the model only argues for it.
 export const BriefOut = z.object({
-  recommendedLever: z.enum(["market", "partner", "crossover"]),
   rationale: z.array(Cited),
   whyNotOthers: z.array(Cited),
   tradeoffs: z.array(z.string()),
@@ -18,11 +18,28 @@ export const BriefOut = z.object({
 
 const RANK = { high: 3, medium: 2, low: 1 } as const;
 
+/**
+ * Deterministic recommendation: highest confidence first; ties go to the bridge (partner-led)
+ * concept when most comp pairs share an audience, otherwise to the market-led one; any remaining
+ * tie keeps the market, partner, crossover order. The same evidence always gives the same pick.
+ */
 export function pickRecommended(concepts: Concept[], audience: AudienceMap): Concept {
-  // Tie-break: bridge when most comp pairs share an audience, otherwise lead with one audience.
+  return explainRecommended(concepts, audience).concept;
+}
+
+export function explainRecommended(concepts: Concept[], audience: AudienceMap): { concept: Concept; reason: string } {
   const similar = audience.overlaps.filter((o) => o.similar).length;
   const prefer = audience.overlaps.length && similar * 2 >= audience.overlaps.length ? "partner" : "market";
-  return [...concepts].sort((a, b) => RANK[b.confidence] - RANK[a.confidence] || Number(b.lever === prefer) - Number(a.lever === prefer))[0];
+  const sorted = [...concepts].sort((a, b) => RANK[b.confidence] - RANK[a.confidence] || Number(b.lever === prefer) - Number(a.lever === prefer));
+  const concept = sorted[0];
+  const tied = concepts.filter((c) => c.confidence === concept.confidence).length > 1;
+  const verdict = `${similar} of ${audience.overlaps.length} comp pairs share an audience`;
+  const reason = !tied
+    ? `highest confidence (${concept.confidence})`
+    : concept.lever === prefer
+      ? `tied on ${concept.confidence} confidence; ${verdict}, so the ${prefer === "partner" ? "bridge" : "market-led"} concept leads`
+      : `tied on ${concept.confidence} confidence; first in market, partner, crossover order`;
+  return { concept, reason };
 }
 
 export function templateBrief(concepts: Concept[], audience: AudienceMap, comps: Comp[]): DecisionBrief {

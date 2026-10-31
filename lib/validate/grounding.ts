@@ -1,7 +1,9 @@
 // Grounding validator. Runs on every piece of LLM prose before it reaches the browser:
 //  1. cited fact IDs must exist (interpretations need at least one),
-//  2. every numeral must match a value in the cited facts (or the brief),
-//  3. every proper-noun-like name must appear in the facts, comps or brief,
+//  2. every numeral must match a value in the cited facts (or the brief), and quantity
+//     words ("ten times", "twice as", "one in five", "millions of") are refused outright,
+//  3. every word of a proper-noun-like name must be a whole word of a name in the facts,
+//     comps or brief (so an invented "Ghost Adventures Weekly" fails even with a "Ghost" tag),
 //  4. in a cited sentence, every partner, show, artist, brand or city it names must be
 //     the subject of one of that sentence's own cited facts (not just exist somewhere),
 //  5. sensitive-trait language is blocked,
@@ -17,9 +19,18 @@ export type Issue = { text: string; reason: string };
 export type GroundingContext = {
   facts: Map<string, Fact>;
   knownNames: string[]; // lower-cased
+  /** Lower-cased known names, for exact lookups (e.g. a partner literally named "F1"). */
+  known: Set<string>;
+  /** Every whole word of every known name. */
+  knownWords: Set<string>;
   briefNumbers: number[];
-  /** Matches any known name, longest first, so names are never read as numbers or sensitive words. */
+  /** Matches any known name, longest first, so names are never read as numbers. */
   namePattern: RegExp | null;
+  /**
+   * Matches entity names only (comps, title, partners, cities), never taste tags, so a name like
+   * "RuPaul's Drag Race" is not read as sensitive language but a tag named "Mental Illness" is.
+   */
+  entityPattern: RegExp | null;
   /** Matches partner/market names (affinity and heatmap subjects, reference cities), longest first. */
   subjectPattern: RegExp | null;
   /** Names a sentence may mention without citing a fact about them: comps, the release title. */
@@ -57,6 +68,14 @@ export function makeContext(facts: Fact[], comps: Comp[], brief: Brief): Groundi
   const briefNumbers = [...(brief.logline ?? "").matchAll(/\d+(?:\.\d+)?/g)].map((m) => Number(m[0]));
   for (const c of comps) if (c.year) briefNumbers.push(c.year);
   const knownNames = [...names];
+  const entities = new Set<string>([...comps.map((c) => c.name), ...brief.comps, brief.title, ...CITIES.map((c) => c.name)].map((n) => n.toLowerCase()));
+  for (const f of facts) if ((f.kind === "affinity" || f.kind === "heatmap") && f.subject?.name) entities.add(f.subject.name.toLowerCase());
+  const knownWords = new Set<string>();
+  for (const n of knownNames)
+    for (const w of wordsOf(n)) {
+      knownWords.add(w);
+      knownWords.add(w.replace(/[’']s$/, ""));
+    }
   const subjects = new Set<string>(CITIES.map((c) => c.name.toLowerCase()));
   for (const f of facts) if ((f.kind === "affinity" || f.kind === "heatmap") && f.subject?.name) subjects.add(f.subject.name.toLowerCase());
   const exempt = new Set([...comps.map((c) => c.name.toLowerCase()), ...brief.comps.map((c) => c.toLowerCase()), brief.title.toLowerCase()]);
@@ -64,8 +83,11 @@ export function makeContext(facts: Fact[], comps: Comp[], brief: Brief): Groundi
   return {
     facts: new Map(facts.map((f) => [f.id, f])),
     knownNames,
+    known: names,
+    knownWords,
     briefNumbers,
     namePattern: buildNamePattern(knownNames),
+    entityPattern: buildNamePattern([...entities]),
     subjectPattern: buildSubjectPattern([...subjects]),
     exempt,
   };
@@ -79,14 +101,24 @@ function buildSubjectPattern(names: string[]): RegExp | null {
 
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+/** Whole-word, longest-first. Two-letter names count only if they hold a digit ("F1"), not "us" or "uk". */
 function buildNamePattern(names: string[]): RegExp | null {
-  const usable = names.filter((n) => n.length >= 3).sort((a, b) => b.length - a.length);
-  return usable.length ? new RegExp(usable.map(escapeRegex).join("|"), "gi") : null;
+  const usable = names.filter((n) => n.length >= 3 || (n.length === 2 && /\d/.test(n))).sort((a, b) => b.length - a.length);
+  return usable.length ? new RegExp(`(?<![\\p{L}\\p{N}])(?:${usable.map(escapeRegex).join("|")})(?![\\p{L}\\p{N}])`, "giu") : null;
+}
+
+/** Lower-cased words with surrounding punctuation removed ("“Wren", "Ash." → "wren", "ash"). */
+function wordsOf(s: string): string[] {
+  return s
+    .toLowerCase()
+    .split(/\s+/)
+    .map((w) => w.replace(/^[^\p{L}\p{N}&]+|[^\p{L}\p{N}&]+$/gu, ""))
+    .filter(Boolean);
 }
 
 /** Replace known entity names (e.g. "The 1975", "RuPaul's Drag Race") with a neutral token. */
-export function maskKnownNames(text: string, ctx: GroundingContext): string {
-  return ctx.namePattern ? text.replace(ctx.namePattern, "‹name›") : text;
+export function maskKnownNames(text: string, ctx: GroundingContext, pattern: RegExp | null = ctx.namePattern): string {
+  return pattern ? text.replace(pattern, "‹name›") : text;
 }
 
 function factNumbers(f: Fact): number[] {
@@ -103,13 +135,32 @@ function numberMatches(n: number, isPercent: boolean, candidates: number[]): boo
   });
 }
 
-/** Strip fact markers like (F3, F7) or [F3] before analysing prose. */
-export function stripCitations(text: string) {
-  return text.replace(/\s*[[(]\s*F\d+(?:\s*[,;]\s*F\d+)*\s*[\])]/g, "").replace(/\bF\d+\b/g, "");
+/**
+ * Strip fact markers like (F3, F7) or [F3] before analysing prose. A bare "F12" is a marker too,
+ * unless it is a known name (a partner or film called "F1"), which is kept.
+ */
+export function stripCitations(text: string, keep?: Set<string>) {
+  return text.replace(/\s*[[(]\s*F\d+(?:\s*[,;]\s*F\d+)*\s*[\])]/g, "").replace(/\bF\d+\b/g, (m) => (keep?.has(m.toLowerCase()) ? m : ""));
 }
 
+// Quantities written in words cannot match a fact value, so they are refused like an unknown number.
+const NUM_WORD = "one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|a hundred|hundred";
+const QUANTITY_WORDS = new RegExp(
+  [
+    `\\b(?:${NUM_WORD})[\\s-]*(?:times|fold|percent|per\\s*cent)\\b`,
+    `\\b(?:twice|thrice)\\s+(?:as|the)\\b`,
+    `\\b(?:double|triple|quadruple)\\s+as\\b`,
+    `\\b(?:${NUM_WORD})\\s+(?:in|out of)\\s+(?:${NUM_WORD}|\\d+)\\b`,
+    `\\b(?:dozens|hundreds|thousands|millions|billions)\\s+of\\b`,
+    `\\b(?:${NUM_WORD}|a)\\s+(?:thousand|million|billion)\\b`,
+  ].join("|"),
+  "i",
+);
+
 export function checkNumbers(text: string, factIds: string[], ctx: GroundingContext): Issue | null {
-  const clean = maskKnownNames(stripCitations(text), ctx);
+  const clean = maskKnownNames(stripCitations(text, ctx.known), ctx);
+  const words = clean.match(QUANTITY_WORDS);
+  if (words) return { text, reason: `quantity "${words[0]}" is not a Qloo value` };
   const cands = [...factIds.flatMap((id) => (ctx.facts.get(id) ? factNumbers(ctx.facts.get(id)!) : [])), ...ctx.briefNumbers];
   for (const m of clean.matchAll(/(\d+(?:\.\d+)?)(\s*%|\s*percent)?/g)) {
     const n = Number(m[1]);
@@ -119,8 +170,8 @@ export function checkNumbers(text: string, factIds: string[], ctx: GroundingCont
 }
 
 /** Candidate entity mentions: quoted strings and runs of Capitalised words. */
-export function entityMentions(text: string): string[] {
-  const clean = stripCitations(text);
+export function entityMentions(text: string, keep?: Set<string>): string[] {
+  const clean = stripCitations(text, keep);
   const out = new Set<string>();
   for (const m of clean.matchAll(/["“]([^"”]{2,60})["”]/g)) out.add(m[1].trim());
   const bare = (w: string) => w.replace(/^[("'‘“]+/, "").replace(/[.,!?;:'’)"”]+$/, "");
@@ -150,16 +201,22 @@ export function entityMentions(text: string): string[] {
   return [...out];
 }
 
+/**
+ * A mention is known when it is a known name, or when each of its non-stop words is a whole word
+ * of some known name (allowing a plural or possessive "s"). Substrings do not count: "Ghostbusters"
+ * is not known because "Ghost" is.
+ */
 function isKnown(mention: string, ctx: GroundingContext): boolean {
   const m = mention.toLowerCase().replace(/[’']s$/, "").trim();
-  if (!m) return true;
-  const words = m.split(/\s+/).filter((w) => !STOP.has(w.replace(/[^a-z&'-]/g, "")));
+  if (!m || ctx.known.has(m)) return true;
+  const words = wordsOf(m).filter((w) => !STOP.has(w.replace(/[^a-z&'-]/g, "")));
   if (!words.length) return true;
-  return ctx.knownNames.some((n) => n.includes(m) || m.includes(n) || words.every((w) => n.includes(w)));
+  const has = (w: string) => ctx.knownWords.has(w) || ctx.knownWords.has(w.replace(/[’']s$/, "")) || (w.endsWith("s") && ctx.knownWords.has(w.slice(0, -1)));
+  return words.every(has);
 }
 
 export function checkEntities(text: string, ctx: GroundingContext): Issue | null {
-  for (const mention of entityMentions(text)) {
+  for (const mention of entityMentions(text, ctx.known)) {
     if (!isKnown(mention, ctx)) return { text, reason: `unknown entity "${mention}"` };
   }
   return null;
@@ -184,7 +241,7 @@ export function namedSubjects(clean: string, ctx: GroundingContext): { name: str
 
 export function checkCitedSubjects(text: string, factIds: string[], ctx: GroundingContext): Issue | null {
   const cited = new Set(factIds.map((id) => ctx.facts.get(id)?.subject?.name?.toLowerCase()).filter((n): n is string => !!n));
-  for (const { name } of namedSubjects(stripCitations(text), ctx)) {
+  for (const { name } of namedSubjects(stripCitations(text, ctx.known), ctx)) {
     if (!cited.has(name.toLowerCase())) return { text, reason: `names "${name}" but none of its cited facts is about it` };
   }
   return null;
@@ -193,13 +250,13 @@ export function checkCitedSubjects(text: string, factIds: string[], ctx: Groundi
 /** Rule 6: comparative and superlative claims must match the run's scores. */
 export function checkComparativeClaim(text: string, ctx: GroundingContext): Issue | null {
   if (!ctx.scores) return null;
-  const clean = stripCitations(text);
+  const clean = stripCitations(text, ctx.known);
   const issue = checkComparative(clean, namedSubjects(clean, ctx), ctx.scores);
   return issue ? { text, reason: issue.reason } : null;
 }
 
 export function checkSensitive(text: string, ctx?: GroundingContext): Issue | null {
-  const m = (ctx ? maskKnownNames(text, ctx) : text).match(SENSITIVE);
+  const m = (ctx ? maskKnownNames(text, ctx, ctx.entityPattern) : text).match(SENSITIVE);
   return m ? { text, reason: `sensitive-trait language "${m[0]}"` } : null;
 }
 

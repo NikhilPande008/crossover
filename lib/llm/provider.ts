@@ -12,6 +12,7 @@ import { config } from "@/lib/config";
 import type { ProviderName, UsageMeter } from "./usage";
 import { AnthropicLLM } from "./anthropic";
 import { OpenAICompatibleLLM } from "./openai-compatible";
+import { describeLLMError } from "./budget";
 
 export type Effort = "low" | "medium" | "high";
 
@@ -22,8 +23,12 @@ export type ToolTurn = {
   stopReason: string | null;
 };
 
-/** Every call can be metered; `phase` labels it in the cost breakdown (research, conceive, brief, baseline). */
-export type Metering = { meter?: UsageMeter; phase?: string };
+/**
+ * Per-call options. Every call can be metered; `phase` labels it in the cost breakdown (research,
+ * conceive, brief, baseline). `deadline` (epoch ms) caps the call and any retries inside it;
+ * `signal` cancels it when the requester goes away.
+ */
+export type Metering = { meter?: UsageMeter; phase?: string; deadline?: number; signal?: AbortSignal };
 
 export interface LLM {
   provider: ProviderName;
@@ -63,7 +68,11 @@ const status = { lastError: undefined as string | undefined, lastOkAt: undefined
 export function llmStatus() {
   return { enabled: config.llmEnabled(), provider: config.llmProvider(), model: config.llmModel(), baseUrl: config.llmProvider() === "anthropic" ? undefined : config.llmBaseUrl(), ...status };
 }
+/** Records the outcome for /api/health. The full error goes to the server log; health gets the short form. */
 export function noteLLM(ok: boolean, err?: unknown) {
   if (ok) status.lastOkAt = new Date().toISOString();
-  else status.lastError = err instanceof Error ? err.message : String(err);
+  else {
+    console.warn("[llm-error]", err instanceof Error ? err.message : err);
+    status.lastError = describeLLMError(err);
+  }
 }

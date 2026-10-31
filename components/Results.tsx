@@ -16,6 +16,9 @@ type Tab = (typeof TABS)[number];
 
 const DOMAIN_LABEL: Record<Domain, string> = { podcast: "Podcasts", artist: "Artists", tv_show: "TV", movie: "Films", book: "Books", brand: "Brands" };
 const LEVER_LABEL = { market: "Market-led", partner: "Partner-led", crossover: "Crossover" };
+/** Match the server's limits on refinements (lib/validate/input.ts). */
+const MAX_PINS = 5;
+const MAX_EXCLUDED = 20;
 
 export function Results(props: {
   result: RunResult;
@@ -111,6 +114,7 @@ function RunHeader({ result, busy, steps, preset, refinements, onRefine, onSwap 
           Swap comp
         </Button>
       </div>
+      <LeadLine result={result} />
       {showSwap && (
         <form
           className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface p-3 text-sm"
@@ -159,6 +163,29 @@ function RunHeader({ result, busy, steps, preset, refinements, onRefine, onSwap 
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * The core decision in one line: which comp(s) the recommended concept positions against, and
+ * how many comp pairs Qloo's theme compare says share an audience. Built from the run's own data.
+ */
+function LeadLine({ result }: { result: RunResult }) {
+  const rec = result.concepts.find((c) => c.id === result.decision.recommendedId);
+  if (!rec) return null;
+  const name = (id: string) => result.comps.find((c) => c.entityId === id)?.name ?? id;
+  const pairs = result.audience.overlaps;
+  const shared = pairs.filter((o) => o.similar).length;
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+      <Badge tone="accent">Lead with</Badge>
+      <b>{rec.leadComps.map(name).join(" + ")}</b>
+      <span className="text-muted">
+        · {LEVER_LABEL[rec.lever].toLowerCase()} concept
+        {pairs.length > 0 && ` · ${shared} of ${pairs.length} comp pair${pairs.length === 1 ? "" : "s"} share an audience (Qloo theme overlap)`}
+      </span>
+      {pairs.length > 0 && <FactChips ids={pairs.flatMap((o) => o.factIds)} title="One audience or two?" max={1} />}
+    </div>
   );
 }
 
@@ -268,7 +295,7 @@ function Concepts({ result, refinements, onRefine, onRelax, busy }: Parameters<t
               result={result}
               recommended={c.id === rec?.id}
               busy={busy}
-              onExclude={(name) => onRefine({ ...refinements, excludedPartners: [...refinements.excludedPartners, name] })}
+              onExclude={refinements.excludedPartners.length < MAX_EXCLUDED ? (name) => onRefine({ ...refinements, excludedPartners: [...refinements.excludedPartners, name] }) : undefined}
             />
           ))}
       </div>
@@ -289,7 +316,7 @@ function Concepts({ result, refinements, onRefine, onRelax, busy }: Parameters<t
   );
 }
 
-function ConceptCard({ c, result, recommended, onExclude, busy }: { c: Concept; result: RunResult; recommended: boolean; onExclude: (name: string) => void; busy: boolean }) {
+function ConceptCard({ c, result, recommended, onExclude, busy }: { c: Concept; result: RunResult; recommended: boolean; onExclude?: (name: string) => void; busy: boolean }) {
   const name = (id: string) => result.comps.find((x) => x.entityId === id)?.name ?? id;
   return (
     <Card className={cx("flex flex-col gap-4", recommended && "border-accent ring-1 ring-accent")}>
@@ -331,9 +358,9 @@ function ConceptCard({ c, result, recommended, onExclude, busy }: { c: Concept; 
               <span className="flex shrink-0 items-center gap-2">
                 <button
                   className="whitespace-nowrap text-xs text-muted sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100 hover:text-warn disabled:cursor-not-allowed"
-                  disabled={busy}
-                  onClick={() => onExclude(p.name)}
-                  title="Exclude and re-plan"
+                  disabled={busy || !onExclude}
+                  onClick={() => onExclude?.(p.name)}
+                  title={onExclude ? "Exclude and re-plan" : `Up to ${MAX_EXCLUDED} excluded partners`}
                 >
                   Not a fit
                 </button>
@@ -402,10 +429,10 @@ function AudienceMap({ result, refinements, onRefine, busy }: Parameters<typeof 
                 <span className="flex items-center gap-2">
                   <Bar value={m.score} tone="accent" />
                   <button
-                    className={cx("text-xs", refinements.pinnedMarkets.includes(m.name) ? "text-accent" : "text-muted hover:text-ink")}
-                    disabled={busy || refinements.pinnedMarkets.includes(m.name)}
+                    className={cx("text-xs disabled:cursor-not-allowed", refinements.pinnedMarkets.includes(m.name) ? "text-accent" : "text-muted hover:text-ink")}
+                    disabled={busy || refinements.pinnedMarkets.includes(m.name) || refinements.pinnedMarkets.length >= MAX_PINS}
                     onClick={() => onRefine({ ...refinements, pinnedMarkets: [...refinements.pinnedMarkets, m.name] })}
-                    title="Pin this market into every concept"
+                    title={refinements.pinnedMarkets.length >= MAX_PINS && !refinements.pinnedMarkets.includes(m.name) ? `Up to ${MAX_PINS} pinned markets` : "Pin this market into every concept"}
                   >
                     {refinements.pinnedMarkets.includes(m.name) ? "Pinned" : "Pin"}
                   </button>
@@ -472,12 +499,14 @@ function AudienceMap({ result, refinements, onRefine, busy }: Parameters<typeof 
         <Label>What they love across domains</Label>
         <div className="mt-3 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {domains.map((d) => (
-            <div key={d}>
+            <div key={d} className="min-w-0">
               <div className="text-sm font-semibold">{DOMAIN_LABEL[d]}</div>
               <ul className="mt-2 space-y-1.5 text-sm">
                 {a.partners[d].slice(0, 6).map((p) => (
                   <li key={p.name} className="flex items-center justify-between gap-2">
-                    <span className="truncate">{p.name}</span>
+                    <span className="min-w-0 truncate" title={p.name}>
+                      {p.name}
+                    </span>
                     <span className="flex shrink-0 items-center gap-2">
                       <span className="flex gap-0.5" title={result.comps.map((c) => `${c.name}: ${p.perComp[c.entityId] ?? "no signal"}`).join("\n")}>
                         {result.comps.map((c) => (
@@ -587,9 +616,9 @@ function WithoutQloo({ result }: { result: RunResult }) {
           We give the language model the identical brief and comps without any Qloo tools, then fact-check every partner it names against Qloo using the same code as
           Crossover.
         </p>
-        {!d && (
+        {(!d || d.error) && (
           <Button className="mt-4" onClick={load} disabled={state.loading}>
-            {state.loading ? "Asking the model alone…" : "Show without Qloo"}
+            {state.loading ? "Asking the model alone…" : state.error || d?.error ? "Try again" : "Show without Qloo"}
           </Button>
         )}
         {(state.error || d?.error) && <p className="mt-3 text-sm text-warn">{state.error ?? d?.error}</p>}

@@ -199,7 +199,11 @@ export function buildAudienceMap(facts: Fact[], comps: Comp[], gaps: string[], w
   };
 }
 
-/** Deterministic confidence: never judged by the LLM. */
+/**
+ * Deterministic confidence: never judged by the LLM. Agreement and strength count only
+ * per-comp facts: a combined-signal fact (several comps in one request) says nothing about
+ * whether the comps agree, so it can make an item "moderate" but never "agreeing" or "strong".
+ */
 export function conceptConfidence(concept: Pick<Concept, "partners" | "markets">, facts: Fact[], comps: Comp[], usedFallback: boolean): Confidence {
   const byId = new Map(facts.map((f) => [f.id, f]));
   const items = [...concept.partners, ...concept.markets];
@@ -209,11 +213,13 @@ export function conceptConfidence(concept: Pick<Concept, "partners" | "markets">
   let moderate = 0;
   for (const it of items) {
     const fs = it.factIds.map((id) => byId.get(id)).filter((f): f is Fact => !!f);
-    const supporting = new Set(fs.filter((f) => (f.value as number) >= THRESHOLDS.affinityFloor).flatMap((f) => f.compIds));
-    const maxAff = Math.max(0, ...fs.filter((f) => f.kind !== "heatmap").map((f) => f.value as number));
-    if (supporting.size >= Math.min(3, comps.length) && comps.length >= 2) agreeing++;
+    const above = fs.filter((f) => (f.value as number) >= THRESHOLDS.affinityFloor);
+    const single = above.filter((f) => f.compIds.length === 1);
+    const agreeingComps = new Set(single.map((f) => f.compIds[0]));
+    const maxAff = Math.max(0, ...fs.filter((f) => f.kind !== "heatmap" && f.compIds.length === 1).map((f) => f.value as number));
+    if (agreeingComps.size >= Math.min(3, comps.length) && comps.length >= 2) agreeing++;
     if (maxAff >= THRESHOLDS.strongAffinity) strongSpecific++;
-    if (supporting.size >= 1) moderate++;
+    if (above.length >= 1) moderate++;
   }
   const n = items.length;
   if (usedFallback && moderate / n < 0.8) return "low";

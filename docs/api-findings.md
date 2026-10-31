@@ -4,6 +4,8 @@ Run: 2026-10-25T06:35:35.401Z · host https://hackathon.api.qloo.com · 29 calls
 
 Only shapes and pass/fail results are recorded here. No Qloo response values are committed.
 
+> Note (2026-10-31): this file is from the first spike. The two heatmap ❌ rows were caused by `take=60`; Qloo accepts 1–50, and Crossover now sends 50, so country heatmaps for the US and UK work. Re-run `npm run api-test` to refresh this file.
+
 ## Test results
 
 | Test | Pass | Notes |

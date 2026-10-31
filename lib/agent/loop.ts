@@ -1,7 +1,8 @@
 // The Crossover agent: plan → research → assess → (recover) → conceive → critique → brief.
 // The LLM chooses research calls and writes interpretations; code does retrieval,
 // scoring, constraint checks and validation. Hard limits: 6 agent turns,
-// QLOO_MAX_CALLS_PER_RUN Qloo calls, 60 s wall clock.
+// QLOO_MAX_CALLS_PER_RUN Qloo calls, 60 s wall clock (RUN_WALL_SECONDS) for starting work,
+// and a hard stop for any model call 40 s after that, inside the route's 120 s limit.
 
 import type Anthropic from "@anthropic-ai/sdk";
 import { randomUUID } from "node:crypto";
@@ -10,6 +11,7 @@ import { config } from "@/lib/config";
 import { FactStore } from "@/lib/facts/store";
 import { QlooClient } from "@/lib/qloo/client";
 import { getLLM, noteLLM, type LLM } from "@/lib/llm/provider";
+import { describeLLMError } from "@/lib/llm/budget";
 import { UsageMeter, formatUsage } from "@/lib/llm/usage";
 import { buildAudienceMap } from "@/lib/score";
 import { THRESHOLDS } from "@/lib/thresholds";
@@ -30,7 +32,7 @@ import {
   templateConcepts,
   type Candidates,
 } from "./concepts";
-import { BriefOut, templateBrief, DISCLAIMER } from "./brief";
+import { BriefOut, explainRecommended, templateBrief, DISCLAIMER } from "./brief";
 
 export type PlanInput = {
   brief: Brief;
@@ -49,10 +51,13 @@ export class RunAborted extends Error {
 }
 
 const MAX_TURNS = 6;
+/** How long a model call may run past the wall-clock budget (default 60 + 40 = 100 s, under maxDuration 120). */
+const LLM_GRACE_MS = 40_000;
 
 export async function runPlan(input: PlanInput, emit: (e: ProgressEvent) => void = () => {}): Promise<RunResult> {
   const t0 = Date.now();
   const deadline = t0 + config.runWallMs();
+  const llmDeadline = deadline + LLM_GRACE_MS;
   const { brief, comps } = input;
   const ref: Refinements = input.refinements ?? { excludedPartners: [], pinnedMarkets: [] };
   const checkpoint = () => {
@@ -111,12 +116,12 @@ export async function runPlan(input: PlanInput, emit: (e: ProgressEvent) => void
   // ---------- research (agent-driven) ----------
   if (llm) {
     try {
-      llmUsed = await researchWithLLM(llm, { brief, comps, client, exec, attempted, store, log, step, deadline, checkpoint, meter });
+      llmUsed = await researchWithLLM(llm, { brief, comps, client, exec, attempted, store, log, step, deadline, checkpoint, meter, signal: input.signal });
       noteLLM(true);
     } catch (e) {
       if (e instanceof RunAborted) throw e;
       noteLLM(false, e);
-      log("error", `Research planner unavailable (${e instanceof Error ? e.message : e}); continuing with the default plan`);
+      log("error", `Research planner unavailable (${describeLLMError(e)}); continuing with the default plan`);
     }
   } else {
     log("plan", "No language model configured: running the default research plan");
@@ -168,12 +173,13 @@ export async function runPlan(input: PlanInput, emit: (e: ProgressEvent) => void
   let concepts: Concept[] | null = null;
   if (llm && Date.now() < deadline - 10_000) {
     try {
-      concepts = await conceiveWithLLM(llm, meter, brief, comps, cand, store, audience.overlaps.map((o) => `${o.a} vs ${o.b}: ${o.similar ? "one audience" : "two audiences"} (theme share ${o.themeShare}); shared themes ${o.shared.join(", ")}`).join("\n"));
+      concepts = await conceiveWithLLM(llm, { meter, deadline: llmDeadline, signal: input.signal }, brief, comps, cand, store, audience.overlaps.map((o) => `${o.a} vs ${o.b}: ${o.similar ? "one audience" : "two audiences"} (theme share ${o.themeShare}); shared themes ${o.shared.join(", ")}`).join("\n"));
       llmUsed = true;
       log("llm", `Drafted ${concepts.length} concepts`);
     } catch (e) {
       noteLLM(false, e);
-      log("error", `Concept writer failed (${e instanceof Error ? e.message : e}); using templated concepts`);
+      if (e instanceof RunAborted || input.signal?.aborted) throw new RunAborted();
+      log("error", `Concept writer failed (${describeLLMError(e)}); using templated concepts`);
     }
   }
   const templates = templateConcepts(audience, cand, comps, brief);
@@ -199,21 +205,30 @@ export async function runPlan(input: PlanInput, emit: (e: ProgressEvent) => void
   // ---------- brief ----------
   checkpoint();
   gctx.scores = buildScoreScope(audience, concepts, comps);
+  // The recommendation is code's, so the same evidence always gives the same pick; the model only argues for it.
+  const picked = explainRecommended(concepts, audience);
+  log("decision", `Recommending ${picked.concept.name} (${picked.concept.lever}): ${picked.reason}`);
   step("Writing the decision brief");
   let decision: DecisionBrief | null = null;
   if (llm && llmUsed && Date.now() < deadline - 5_000) {
     for (let attempt = 0; attempt < 2 && !decision; attempt++) {
+      // The regeneration gets the same start-by limit as the first attempt.
+      if (attempt > 0 && Date.now() >= deadline - 5_000) {
+        log("limit", "No time to regenerate the brief; keeping what passed the validator");
+        break;
+      }
       try {
-        const d = await briefWithLLM(llm, meter, brief, comps, concepts, store);
-        const grounded = groundBrief(d, concepts, gctx, log);
+        const d = await briefWithLLM(llm, { meter, deadline: llmDeadline, signal: input.signal }, brief, comps, concepts, store, picked);
+        const grounded = groundBrief(d, picked.concept, gctx, log);
         if (grounded.share > THRESHOLDS.maxDroppedShare && attempt === 0) {
           log("validator", `Validator dropped ${Math.round(grounded.share * 100)}% of brief sentences; regenerating once`);
           continue;
         }
         if (grounded.brief.rationale.length) decision = grounded.brief;
       } catch (e) {
+        if (input.signal?.aborted) throw new RunAborted();
         noteLLM(false, e);
-        log("error", `Brief writer failed (${e instanceof Error ? e.message : e}); using templated brief`);
+        log("error", `Brief writer failed (${describeLLMError(e)}); using templated brief`);
         break;
       }
     }
@@ -268,6 +283,7 @@ async function researchWithLLM(
     deadline: number;
     checkpoint: () => void;
     meter: UsageMeter;
+    signal?: AbortSignal;
   },
 ): Promise<boolean> {
   const messages: Anthropic.Beta.BetaMessageParam[] = [
@@ -284,7 +300,8 @@ async function researchWithLLM(
       break;
     }
     // First turn must start researching; later turns may finish in text.
-    const r = await llm.toolTurn({ system: RESEARCH_SYSTEM, messages, tools: TOOL_DEFS, effort: "low", requireTool: turn === 0, meter: a.meter, phase: "research" });
+    // Research turns must end by the wall-clock deadline; writing happens after it.
+    const r = await llm.toolTurn({ system: RESEARCH_SYSTEM, messages, tools: TOOL_DEFS, effort: "low", requireTool: turn === 0, meter: a.meter, phase: "research", deadline: a.deadline, signal: a.signal });
     used = true;
     if (r.text.trim()) a.log("plan", r.text.trim().slice(0, 400));
     messages.push({ role: "assistant", content: r.content as Anthropic.Beta.BetaContentBlockParam[] });
@@ -310,7 +327,9 @@ async function researchWithLLM(
   return used;
 }
 
-async function conceiveWithLLM(llm: LLM, meter: UsageMeter, brief: Brief, comps: Comp[], cand: Candidates, store: FactStore, overlaps: string): Promise<Concept[]> {
+type CallOpts = { meter: UsageMeter; deadline: number; signal?: AbortSignal };
+
+async function conceiveWithLLM(llm: LLM, opts: CallOpts, brief: Brief, comps: Comp[], cand: Candidates, store: FactStore, overlaps: string): Promise<Concept[]> {
   const tagFacts = store.summary((f) => f.kind === "tag" || f.kind === "compare" || f.kind === "demographic", 120);
   const user = `${briefBlock(brief, comps)}
 
@@ -326,11 +345,11 @@ Comp overlap (0..1):
 ${overlaps}
 
 Draft the three concepts.`;
-  const out = await llm.structured({ system: CONCEIVE_SYSTEM, user, schema: ConceptsOut, effort: "medium", meter, phase: "conceive" });
+  const out = await llm.structured({ system: CONCEIVE_SYSTEM, user, schema: ConceptsOut, effort: "medium", ...opts, phase: "conceive" });
   return out.concepts.slice(0, 3).map((d, i) => draftToConcept(d, i, cand, comps));
 }
 
-async function briefWithLLM(llm: LLM, meter: UsageMeter, brief: Brief, comps: Comp[], concepts: Concept[], store: FactStore) {
+async function briefWithLLM(llm: LLM, opts: CallOpts, brief: Brief, comps: Comp[], concepts: Concept[], store: FactStore, picked: { concept: Concept; reason: string }) {
   const cited = new Set(concepts.flatMap((c) => [...c.partners, ...c.markets, c.creativeAngle].flatMap((x) => x.factIds)));
   const conceptText = concepts
     .map(
@@ -338,14 +357,14 @@ async function briefWithLLM(llm: LLM, meter: UsageMeter, brief: Brief, comps: Co
         `${c.id} lever=${c.lever} name=${JSON.stringify(c.name)} confidence=${c.confidence}\n  markets: ${c.markets.map((m) => `${m.name} (${m.factIds.slice(0, 3).join(",")})`).join("; ")}\n  partners: ${c.partners.map((p) => `${JSON.stringify(p.name)} ${p.domain} (${p.factIds.slice(0, 3).join(",")})`).join("; ")}\n  angle: ${c.creativeAngle.text}\n  risks: ${c.risks.join(" | ")}`,
     )
     .join("\n");
-  const user = `${briefBlock(brief, comps)}\n\n<concepts>\n${conceptText}\n</concepts>\n\n<facts>\n${store.summary((f) => cited.has(f.id), 150)}\n</facts>\n\nWrite the decision brief.`;
-  return llm.structured({ system: BRIEF_SYSTEM, user, schema: BriefOut, effort: "medium", meter, phase: "brief" });
+  const user = `${briefBlock(brief, comps)}\n\n<concepts>\n${conceptText}\n</concepts>\n\n<recommended>\n${picked.concept.id} lever=${picked.concept.lever}: ${picked.reason}\n</recommended>\n\n<facts>\n${store.summary((f) => cited.has(f.id), 150)}\n</facts>\n\nWrite the decision brief.`;
+  return llm.structured({ system: BRIEF_SYSTEM, user, schema: BriefOut, effort: "medium", ...opts, phase: "brief" });
 }
 
 // ---------- grounding ----------
 
-/** The UI shows citations as chips, so drop fact IDs the model wrote into the prose. */
-const tidy = (t: string) => stripCitations(t).replace(/\s+([.,;:!?])/g, "$1").trim();
+/** The UI shows citations as chips, so drop fact IDs the model wrote into the prose (but keep a name like "F1"). */
+const tidy = (t: string, g: GroundingContext) => stripCitations(t, g.known).replace(/\s+([.,;:!?])/g, "$1").trim();
 
 function groundConcept(c: Concept, fallback: Concept, g: GroundingContext, log: (k: TraceEntry["kind"], m: string) => void): Concept {
   let { name, creativeAngle } = c;
@@ -358,19 +377,19 @@ function groundConcept(c: Concept, fallback: Concept, g: GroundingContext, log: 
   if (!angle.ok) {
     log("validator", `Creative angle replaced: ${angle.issue.reason}`);
     creativeAngle = fallback.creativeAngle;
-  } else creativeAngle = { text: tidy(creativeAngle.text), factIds: angle.factIds };
+  } else creativeAngle = { text: tidy(creativeAngle.text, g), factIds: angle.factIds };
   const keep = (xs: string[], label: string) =>
     xs.filter((x) => {
       const issue = validateUncited(x, g);
       if (issue) log("validator", `${label} dropped: ${issue.reason}`);
       return !issue;
-    }).map(tidy);
+    }).map((x) => tidy(x, g));
   return { ...c, name, creativeAngle, risks: keep(c.risks, "Risk"), hypotheses: keep(c.hypotheses, "Hypothesis") };
 }
 
 function groundBrief(
   d: import("zod").infer<typeof BriefOut>,
-  concepts: Concept[],
+  rec: Concept,
   g: GroundingContext,
   log: (k: TraceEntry["kind"], m: string) => void,
 ): { brief: DecisionBrief; share: number } {
@@ -385,7 +404,7 @@ function groundBrief(
         log("validator", `Dropped: ${r.issue.reason} — ${JSON.stringify(it.text.slice(0, 120))}`);
         return [];
       }
-      return [{ text: tidy(it.text), factIds: r.factIds }];
+      return [{ text: tidy(it.text, g), factIds: r.factIds }];
     });
   const plain = (items: string[]) =>
     items.filter((t) => {
@@ -396,8 +415,7 @@ function groundBrief(
         log("validator", `Dropped: ${issue.reason} — ${JSON.stringify(t.slice(0, 120))}`);
       }
       return !issue;
-    }).map(tidy);
-  const rec = concepts.find((c) => c.lever === d.recommendedLever) ?? concepts[0];
+    }).map((t) => tidy(t, g));
   const brief: DecisionBrief = {
     recommendedId: rec.id,
     rationale: cited(d.rationale),

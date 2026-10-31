@@ -49,8 +49,9 @@ export async function streamPlan(body: unknown, onEvent: (e: ProgressEvent) => v
   if (!finished) emit({ type: "error", message: "The connection dropped before the run finished. Please try again." });
 }
 
-export async function resolveNames(names: string[], format: Brief["format"]): Promise<{ mode: string; resolutions: Resolution[] } | { error: string }> {
-  const res = await fetch("/api/resolve", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ comps: names, format }) });
+/** `suggest` marks autocomplete lookups, which the server caps separately from the confirm step. */
+export async function resolveNames(names: string[], format: Brief["format"], suggest = false): Promise<{ mode: string; resolutions: Resolution[] } | { error: string }> {
+  const res = await fetch("/api/resolve", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ comps: names, format, ...(suggest ? { suggest } : {}) }) });
   const j = await res.json();
   return res.ok ? j : { error: j.error ?? "Could not resolve comps" };
 }
@@ -221,6 +222,17 @@ export function Crossover() {
             }
             const x = r.resolutions[0];
             const c = x.candidates.find((c) => c.name.toLowerCase() === newName.toLowerCase()) ?? x.candidates[0];
+            // Same checks as the confirm step: never silently swap in a different title or a duplicate.
+            if (!isCloseMatch(newName, c.name)) {
+              setBusy(false);
+              setError(`No close match for "${newName}" in Qloo (nearest: "${c.name}"). Try the exact title.`);
+              return;
+            }
+            if (result.comps.some((k) => k.entityId === c.entityId && k.entityId !== fromId)) {
+              setBusy(false);
+              setError(`"${c.name}" is already one of the comps.`);
+              return;
+            }
             const comps = result.comps.map((k) => (k.entityId === fromId ? toComp(c) : k));
             await run({ comps, brief: { ...result.brief, comps: comps.map((k) => k.name) }, prior: result });
           }}
@@ -417,13 +429,13 @@ function CompInput({ value, onChange, index, format, className }: { value: strin
     const t = setTimeout(
       async () => {
         if (hit) return setOptions(hit);
-        const r = await resolveNames([q], format).catch(() => ({ error: "" }));
+        const r = await resolveNames([q], format, true).catch(() => ({ error: "" }));
         if ("error" in r) return;
         const names = [...new Set(r.resolutions[0]?.candidates.map((c) => c.name) ?? [])];
         suggestCache.set(key, names);
         setOptions(names);
       },
-      hit ? 0 : 450,
+      hit ? 0 : 600,
     );
     return () => clearTimeout(t);
   }, [value, format]);
@@ -538,7 +550,8 @@ function Confirm({
 
 function Working({ steps, trace }: { steps: { message: string; calls: number }[]; trace: TraceEntry[] }) {
   const calls = steps.at(-1)?.calls ?? 0;
-  const qloo = trace.filter((t) => t.kind === "qloo").length;
+  // Count only requests actually sent: cache hits and failed requests are traced too.
+  const qloo = trace.filter((t) => t.kind === "qloo" && /^(live|synthetic) /.test(t.message)).length;
   const decisions = trace.filter((t) => t.kind === "decision" || t.kind === "plan" || t.kind === "tool").slice(-6);
   const end = useRef<HTMLDivElement>(null);
   // Braces matter: newer Chrome returns a Promise from scrollIntoView, and React would call it as the cleanup.

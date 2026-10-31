@@ -58,7 +58,9 @@ async function main() {
   console.log("\nOverlaps:");
   const cn = (id: string) => result.comps.find((c) => c.entityId === id)?.name ?? id;
   for (const o of result.audience.overlaps)
-    console.log(`  ${cn(o.a)} vs ${cn(o.b)}: audience overlap ${o.score} over ${o.compared} (${o.basis}); shared audience: ${o.sharedAudience.join(", ") || "—"}; shared themes (${o.source}): ${o.shared.join(", ") || "—"}`);
+    console.log(
+      `  ${cn(o.a)} vs ${cn(o.b)}: ${o.similar ? "one audience" : "two audiences"} (${Math.round(o.themeShare * 100)}% of ${o.themesCompared} themes shared, ${o.source}); top-affinity overlap ${o.score} over ${o.compared} (${o.basis}); shared audience: ${o.sharedAudience.join(", ") || "—"}; shared themes: ${o.shared.join(", ") || "—"}`,
+    );
   console.log("\nConcepts:");
   for (const c of result.concepts) {
     const rec = c.id === result.decision.recommendedId ? " ★ recommended" : "";

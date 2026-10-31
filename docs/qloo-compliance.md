@@ -26,7 +26,7 @@ Checked 2026-10-25 against the [developer guide](https://docs.qloo.com/reference
 | `urn:heatmap` with `filter.location.query` | Documented; examples use cities | ✅ live: "United States" and "United Kingdom" resolve. `take` must be 1–50 (60 returns 400), so we send 50. api-findings.md still shows the earlier 400s; re-run `npm run api-test` to refresh it |
 | Heatmap `affinity_rank` | 0–1, rank-normalised | ✅ fixed (was treated as an integer rank) |
 | Affinity location | Harness reads top-level `affinity` or `query.affinity` | ✅ fixed (was `query.affinity` only) |
-| Compare | `GET /v2/analysis/compare`, `a.`/`b.signal.interests.entities`; `filter.type` does **not** accept `urn:tag`; 404 = "No results"; `results` is an array of undocumented item types | ✅ fixed path, params and 404 handling; tolerant parser in `lib/qloo/compare.ts`. Live shape: `results.tags` (shared, with a score) plus `results.a` / `results.b` (each side's tags). It compares the titles' themes, not their audiences, so audience overlap is computed from per-comp affinities instead |
+| Compare | `GET /v2/analysis/compare`, `a.`/`b.signal.interests.entities`; `filter.type` does **not** accept `urn:tag`; 404 = "No results"; `results` is an array of undocumented item types | ✅ fixed path, params and 404 handling; tolerant parser in `lib/qloo/compare.ts`. Live shape: `results.tags` (shared, with a score) plus `results.a` / `results.b` (each side's tags). The share of distinct themes both titles have decides "one audience or two" (10% or more = one); top-affinity overlap is shown alongside but does not decide it (`lib/score.ts` `buildOverlap`) |
 | `feature.explainability` | Not in the parameter table; the harness sends it | ✅ kept |
 | `page` | Not documented; `offset` is | ✅ allowlist now uses `offset` |
 | Invalid params silently ignored | ✅ documented | ✅ allowlist + filters re-checked in code |
@@ -48,12 +48,12 @@ Checked 2026-10-25 against the [developer guide](https://docs.qloo.com/reference
 1. **Direct REST vs. the harness.** The kit says the event's "supported surfaces are `qloo explore`, `qloo exec`, `qloo api`, and `qloo mcp`". The developer guide shows direct REST with curl and Python. Is a hosted app calling the REST API directly with our event key acceptable? Crossover does this today.
 2. ~~Does `filter.location.query` accept country names for heatmaps?~~ Answered live: yes, for the US and UK.
 3. ~~What is the item schema of `/v2/analysis/compare` `results`?~~ Answered live: see the Compare row.
-4. Monthly quota and rate limit for our key (the guide gives no numbers), and which response headers report the remaining monthly quota.
+4. Monthly quota and rate limit for our key (the guide gives no numbers), and which response headers report the remaining monthly quota. Until this is known, `/api/health` lists the rate-limit and quota header names Qloo has sent (`quotaHeadersSeen`); the quota floor only works if one of them reports a monthly remaining count.
 
 ## Submission guide (kit) items
 
-- Problem statement, the Qloo calls used and why: README + `docs/devpost.md`
-- Redacted request-to-result walkthrough: `docs/devpost.md` (fill after the live run)
+- Problem statement, the Qloo calls used and why: README and the Devpost submission
+- Request-to-result walkthrough: every fact chip in the app opens the exact request behind it
 - A short demo or screenshots with no credentials or personal data: ⏳
 - Clean-environment setup steps: README (fixture mode needs no keys)
 - Known limitations: README "API usage, quotas and limitations"

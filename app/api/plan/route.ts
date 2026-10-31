@@ -6,6 +6,7 @@ import { PlanRequest, EXAMPLE_PLAN_REQUEST } from "@/lib/validate/input";
 import { allowHit, capLimit, clientIp, getRun, isRefinementOf, loadRecorded, recordPreset, saveRun } from "@/lib/runs";
 import { belowQuotaFloor } from "@/lib/qloo/client";
 import { config } from "@/lib/config";
+import { matchesPreset } from "@/lib/presets";
 
 export const maxDuration = 120;
 
@@ -32,6 +33,8 @@ export async function POST(req: Request) {
     prior,
     body.comps.map((c) => c.entityId),
   );
+  // A preset's recording is written and replayed only for that preset's own, unedited brief.
+  const presetId = body.presetId && !isRefinement && matchesPreset(body.presetId, body.brief) ? body.presetId : undefined;
 
   // Aborts the agent when the browser goes away, so abandoned runs stop spending quota.
   const abort = new AbortController();
@@ -70,7 +73,7 @@ export async function POST(req: Request) {
             blocked = `Live ${isRefinement ? "re-plans" : "runs"} are capped at ${capLimit(bucket)} per hour per visitor.`;
         }
         if (blocked) {
-          const rec = body.presetId && !isRefinement ? loadRecorded(body.presetId) : undefined;
+          const rec = presetId ? loadRecorded(presetId) : undefined;
           if (!rec) {
             send({ type: "error", message: `${blocked} Try again later, or open a preset to see a recorded live run.` });
             return;
@@ -93,7 +96,7 @@ export async function POST(req: Request) {
           send,
         );
         saveRun(result);
-        if (body.presetId && !isRefinement && body.refinements.excludedPartners.length === 0 && body.refinements.pinnedMarkets.length === 0) recordPreset(body.presetId, result);
+        if (presetId && body.refinements.excludedPartners.length === 0 && body.refinements.pinnedMarkets.length === 0) recordPreset(presetId, result);
         send({ type: "result", result: forClient(result) });
       } catch (e) {
         if (e instanceof RunAborted) return;
