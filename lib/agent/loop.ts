@@ -51,6 +51,8 @@ export class RunAborted extends Error {
 }
 
 const MAX_TURNS = 6;
+/** Entities a checklist item might derive from a partner without any evidence ("Phoebe Bridgers fan podcasts"). */
+const INVENTED_RELATED = /\bfan[\s-]*(?:podcasts?|communit(?:y|ies)|clubs?|events?|accounts?|pages?|groups?|forums?|sites?|meetups?)\b/i;
 /** How long a model call may run past the wall-clock budget (default 60 + 40 = 100 s, under maxDuration 120). */
 const LLM_GRACE_MS = 40_000;
 
@@ -410,7 +412,10 @@ function groundBrief(
   const inPlan = new Set([...rec.partners, ...rec.markets].map((x) => x.name.toLowerCase()));
   const outsidePlan = (t: string) => {
     const other = namedSubjects(stripCitations(t, g.known), g).find((s) => !inPlan.has(s.name.toLowerCase()));
-    return other ? { text: t, reason: `names "${other.name}", which is not in the recommended concept` } : null;
+    if (other) return { text: t, reason: `names "${other.name}", which is not in the recommended concept` };
+    // "Fan podcasts" or "fan communities" of a partner are invented entities no fact supports.
+    const invented = t.match(INVENTED_RELATED);
+    return invented ? { text: t, reason: `invents "${invented[0]}", which no Qloo fact supports` } : null;
   };
   const plain = (items: string[], extra?: (t: string) => { text: string; reason: string } | null) =>
     items.filter((t) => {

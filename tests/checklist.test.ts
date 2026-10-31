@@ -20,7 +20,7 @@ const fake: LLM = {
       whyNotOthers: [],
       tradeoffs: [],
       // Glasgow cannot be in a US-only plan; the second item names nothing and is kept.
-      testChecklist: ["Run a small paid social test in Glasgow first.", "A/B the creative angle in trailer cut-downs."],
+      testChecklist: ["Run a small paid social test in Glasgow first.", "Pilot reads on fan podcasts before a full partnership.", "A/B the creative angle in trailer cut-downs."],
     } as never;
   },
 };
@@ -39,5 +39,6 @@ describe("decision brief checklist", () => {
     expect(r.decision.writtenBy).toBe("llm");
     expect(r.decision.testChecklist).toEqual(["A/B the creative angle in trailer cut-downs."]);
     expect(r.trace.some((t) => /names "Glasgow", which is not in the recommended concept/.test(t.message))).toBe(true);
+    expect(r.trace.some((t) => /invents "fan podcasts"/.test(t.message))).toBe(true);
   });
 });
