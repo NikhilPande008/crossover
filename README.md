@@ -164,6 +164,8 @@ Any long-running Node host that supports streaming responses (Render, Railway, F
 - Location coverage is verified for the US and UK first; other regions are not offered yet.
 - Demographics are aggregate audience skew only. The validator blocks descriptions by sensitive traits, including when a taste tag has a sensitive name.
 - Per-visitor caps, the run store, the response cache and recorded preset runs live in each server instance's memory (or `/tmp`). On a multi-instance host a re-plan can land on a fresh instance and cost a full run.
+- Brand partners still include household-name brands. Qloo's popularity filters were tested and return noise; a brand-category filter is planned after the hackathon.
+- Planned after the hackathon: shared run storage across server instances (so a comp swap on Vercel always re-uses facts) and a semantic check that cited tags support an angle's wording.
 
 ## Testing and evaluation
 
