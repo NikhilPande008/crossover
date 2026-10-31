@@ -45,6 +45,10 @@ const LOW_SUPER = /\b(lowest|weakest|smallest|least|bottom)\b/i;
 const LOW_COMP = /\b(lower|weaker|smaller|below|behind)\b|\bless\b[^.;]{0,40}\bthan\b/i;
 const AMONG = /\b(among|one of)\b/i;
 // Only claims about the run's numbers are checked; "the most atmospheric show" is taste, not score.
+// Audience-size talk ("risks a smaller niche audience") is not a claim about any named item's score.
+const SIZE_PHRASE = /\b(smaller|larger|bigger|narrower|broader|wider)\s+(?:\w+\s+){0,2}(audience|crowd|fan ?base|following|reach|niche|segment)\b/i;
+/** The comparative word must sit near a named item to be a claim about it. */
+const NEAR_CHARS = 60;
 const SCORE_WORDS = /\b(affinit\w*|scores?|signals?|concentration|interest|heatmap|rank\w*|values?|over-?index\w*|popular\w*|fans?|fanbase|audiences?)\b/i;
 
 export type ComparativeIssue = { reason: string };
@@ -60,6 +64,9 @@ export function checkComparative(text: string, mentions: { name: string; index: 
   const lowComp = text.match(LOW_COMP);
   const kw = highComp ?? highSuper ?? lowComp ?? lowSuper;
   if (!kw || kw.index === undefined || !SCORE_WORDS.test(text)) return null;
+  const size = text.match(SIZE_PHRASE);
+  if (size && size.index !== undefined && kw.index >= size.index && kw.index < size.index + size[0].length) return null;
+  if (!mentions.some((m) => Math.abs(m.index - kw.index!) <= NEAR_CHARS)) return null;
   const direction: "high" | "low" = highComp || highSuper ? "high" : "low";
   const pairwise = Boolean(highComp ?? lowComp) && /\bthan\b/i.test(text);
 

@@ -26,10 +26,10 @@ describe("per-visitor caps", () => {
     expect(isRefinementOf(prior, ["a", "y", "z"])).toBe(false);
     expect(isRefinementOf(undefined, ["a", "b"])).toBe(false);
   });
-  it("counts refinements against their own cap", () => {
+  it("counts refinements against their own cap", async () => {
     const ip = `test-${Math.random()}`;
-    for (let i = 0; i < capLimit("refine"); i++) expect(allowHit("refine", ip)).toBe(true);
-    expect(allowHit("refine", ip)).toBe(false);
+    for (let i = 0; i < capLimit("refine"); i++) expect(await allowHit("refine", ip)).toBe(true);
+    expect(await allowHit("refine", ip)).toBe(false);
   });
   it("ignores client-supplied X-Forwarded-For entries", () => {
     const req = (xff: string) => new Request("http://x", { headers: { "x-forwarded-for": xff } });

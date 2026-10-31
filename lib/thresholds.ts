@@ -29,4 +29,24 @@ export const THRESHOLDS = {
    * with missing popularity (reported as 0). Kept at 0; fixing brand genericness needs a different candidate pool.
    */
   popularityLambda: 0,
+  /**
+   * Weight of lift (affinity for these comps' audience − affinity for a reference audience) in the
+   * partner score. Live 2026-10-31, horror comps vs Barbie + Endgame fans: horror-fiction podcasts
+   * +0.06 to +0.14, Tesla −0.015, Apple −0.041. Partners with lift ≤ 0 are left out as generic.
+   */
+  liftWeight: 2,
+  /** Lift at or above which a partner counts as distinctive for these comps (confidence). */
+  distinctLift: 0.03,
+  /**
+   * One audience or two, from cross-affinity: each comp scored inside the other's audience, minus its
+   * score inside the reference audience; the verdict uses the smaller of the two lifts. Live
+   * 2026-10-31: Hereditary/The Witch +0.21/+0.14 (one), Hereditary/Lady Bird +0.06/+0.07 (adjacent),
+   * The Witch/Lady Bird +0.01/+0.09 (different); control titles −0.08 to +0.08.
+   */
+  oneAudienceLift: 0.12,
+  adjacentLift: 0.05,
+  /** Weight of a city's over-index (vs the reference audience) next to its concentration. */
+  marketLiftWeight: 0.5,
+  /** A city that over-indexes at least this much for every comp is flagged as possibly broad. */
+  broadOverIndex: 0.4,
 };

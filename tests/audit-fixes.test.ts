@@ -85,15 +85,15 @@ describe("presets and recorded runs", () => {
     expect(matchesPreset(preset.id, { ...preset.brief, comps: preset.brief.comps.map((c) => (c === preset.swap.from ? preset.swap.to : c)) })).toBe(false);
     expect(matchesPreset(preset.id, { ...preset.brief, title: "Something else" })).toBe(false);
   });
-  it("refuses unsafe ids for recorded-run files", () => {
-    expect(loadRecorded("../../package")).toBeUndefined();
+  it("refuses unsafe ids for recorded-run files", async () => {
+    expect(await loadRecorded("../../package")).toBeUndefined();
   });
 });
 
 describe("baseline route", () => {
   const run = { runId: "known-run", mode: "fixture", brief, comps, facts: [] } as unknown as RunResult;
   it("does not let a malformed client copy block a run the server knows", async () => {
-    saveRun(run);
+    await saveRun(run);
     const { POST } = await import("@/app/api/baseline/route");
     const res = await POST(new Request("http://x/api/baseline", { method: "POST", body: JSON.stringify({ runId: "known-run", run: { junk: true } }) }));
     expect(res.status).toBe(200);

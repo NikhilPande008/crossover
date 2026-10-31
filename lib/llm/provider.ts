@@ -28,7 +28,14 @@ export type ToolTurn = {
  * conceive, brief, baseline). `deadline` (epoch ms) caps the call and any retries inside it;
  * `signal` cancels it when the requester goes away.
  */
-export type Metering = { meter?: UsageMeter; phase?: string; deadline?: number; signal?: AbortSignal };
+export type Metering = {
+  meter?: UsageMeter;
+  phase?: string;
+  deadline?: number;
+  signal?: AbortSignal;
+  /** Per-attempt cap, below the provider default: a stalled call is retried once instead of waiting out the run. */
+  maxMs?: number;
+};
 
 export interface LLM {
   provider: ProviderName;

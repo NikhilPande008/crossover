@@ -25,7 +25,7 @@ beforeAll(async () => {
 describe("agent (fixture mode)", () => {
   it("stays inside the Qloo call budget", () => {
     expect(run.qlooCalls).toBeGreaterThan(10);
-    expect(run.qlooCalls).toBeLessThanOrEqual(30);
+    expect(run.qlooCalls).toBeLessThanOrEqual(60);
   });
   it("produces three concepts with distinct levers", () => {
     expect(run.concepts.map((c) => c.lever).sort()).toEqual(["crossover", "market", "partner"]);
@@ -58,7 +58,8 @@ describe("agent (fixture mode)", () => {
     // swap looks cheap even if no prior fact were reused.
     resetQlooCache();
     const next = await runPlan({ brief: preset.brief, comps: swapped, priorFacts: run.facts, mode: "fixture" });
-    expect(next.qlooCalls).toBeLessThanOrEqual(10); // only the new comp: 4 domains, tags, 2 regions, demographics, 2 compares
+    // Only what the new comp changes: its own calls, the cross-affinity pairs it joins, and re-scoring the partner pool for the new comp set.
+    expect(next.qlooCalls).toBeLessThanOrEqual(30);
     expect(next.cachedCalls).toBe(0);
     resetQlooCache();
     const fromScratch = await runPlan({ brief: preset.brief, comps: swapped, mode: "fixture" });

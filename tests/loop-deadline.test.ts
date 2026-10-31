@@ -19,9 +19,10 @@ const fake: LLM = {
   async structured(a) {
     deadlines.push({ phase: a.phase, deadline: a.deadline });
     if (a.phase === "conceive") return { concepts: [] } as never;
+    if (a.phase === "repair") return { angles: [] } as never;
     // A slow brief whose every sentence fails the validator: the loop would normally regenerate.
     skew += 120_000;
-    return { recommendedLever: "market", rationale: [{ text: "Totally Invented Partner Network wins.", factIds: ["F1"] }], whyNotOthers: [], tradeoffs: [], testChecklist: [] } as never;
+    return { recommendedLever: "market", rationale: [{ text: "Totally Invented Partner Network wins.", factIds: ["F1"] }], whyNotOthers: [], tradeoffs: [], tests: [] } as never;
   },
 };
 

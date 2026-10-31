@@ -57,7 +57,7 @@ export async function resolveNames(names: string[], format: Brief["format"], sug
 }
 
 function toComp(c: Candidate): Comp {
-  return { name: c.name, entityId: c.entityId, type: c.type, year: c.year, descriptor: c.descriptor };
+  return { name: c.name, entityId: c.entityId, type: c.type, year: c.year, descriptor: c.descriptor, genres: c.genres };
 }
 
 export function Crossover() {
@@ -325,7 +325,8 @@ function BriefForm({ brief, setBrief, busy, onBack, onSubmit }: { brief: Brief; 
               <option value="film">Film</option>
               <option value="series">Series</option>
               <option value="album">Album</option>
-              <option value="tour">Tour</option>
+              <option value="special">Comedy special</option>
+                <option value="tour">Tour</option>
             </select>
           </label>
           <label className="block text-sm font-medium">

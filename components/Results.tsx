@@ -15,7 +15,7 @@ const TABS = ["Concepts", "Audience map", "Without Qloo", "Decision brief", "Age
 type Tab = (typeof TABS)[number];
 
 const DOMAIN_LABEL: Record<Domain, string> = { podcast: "Podcasts", artist: "Artists", tv_show: "TV", movie: "Films", book: "Books", brand: "Brands" };
-const LEVER_LABEL = { market: "Market-led", partner: "Partner-led", crossover: "Crossover" };
+const LEVER_LABEL = { market: "Market-led", partner: "Partner-led", crossover: "Expansion" };
 /** Match the server's limits on refinements (lib/validate/input.ts). */
 const MAX_PINS = 5;
 const MAX_EXCLUDED = 20;
@@ -94,13 +94,6 @@ function RunHeader({ result, busy, steps, preset, refinements, onRefine, onSwap 
         </Badge>
         <Badge>{(result.ms / 1000).toFixed(1)} s</Badge>
         {!result.llmUsed && <Badge tone="warn">Written without the language model</Badge>}
-        {result.llmUsage?.calls > 0 && (
-          <span title={result.llmUsage.byPhase.map((p) => `${p.phase}: ${formatUsage({ ...p, provider: result.llmUsage.provider })}`).join("\n")}>
-            <Badge>
-              {result.llmUsage.models.join(", ")} · {formatUsage(result.llmUsage)}
-            </Badge>
-          </span>
-        )}
       </div>
       <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">“{result.brief.title}”</h1>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted">
@@ -605,8 +598,9 @@ function WithoutQloo({ result }: { result: RunResult }) {
   const load = async () => {
     setState({ loading: true });
     // The run goes along too: on a multi-instance host the server that planned it may not get this request.
-    const { runId, mode, brief, comps, facts } = result;
-    const r = await fetch("/api/baseline", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ runId, run: { runId, mode, brief, comps, facts } }) }).catch(() => null);
+    const { runId, mode, brief, comps, facts, concepts, audience } = result;
+    const run = { runId, mode, brief, comps, facts, concepts: concepts.map((c) => ({ partners: c.partners })), audience: { partners: audience.partners, markets: audience.markets } };
+    const r = await fetch("/api/baseline", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ runId, run }) }).catch(() => null);
     const j = r ? await r.json().catch(() => ({})) : {};
     setState(r?.ok ? { loading: false, data: j } : { loading: false, error: j.error ?? "Could not reach the server. Please try again." });
   };
@@ -659,7 +653,15 @@ function WithoutQloo({ result }: { result: RunResult }) {
                         <span>
                           {p.name} <span className="text-xs text-muted">{DOMAIN_LABEL[p.domain as Domain] ?? p.domain}</span>
                         </span>
-                        {chk?.inCrossoverEvidence ? <Badge tone="evidence">in evidence</Badge> : chk?.resolved ? <Badge>no affinity found</Badge> : <Badge tone="warn">not in Qloo</Badge>}
+                        {chk?.lift !== undefined ? (
+                          <Badge tone={chk.lift > 0 ? "evidence" : "warn"}>{`${chk.lift > 0 ? "+" : "−"}${Math.abs(Math.round(chk.lift * 100))} vs typical`}</Badge>
+                        ) : chk?.inCrossoverEvidence ? (
+                          <Badge tone="evidence">in our top results</Badge>
+                        ) : chk?.resolved ? (
+                          <Badge>not in our top results</Badge>
+                        ) : (
+                          <Badge tone="warn">not in Qloo</Badge>
+                        )}
                       </li>
                     );
                   })}
@@ -669,8 +671,10 @@ function WithoutQloo({ result }: { result: RunResult }) {
             ))}
           </div>
           <p className="text-xs text-muted">
-            “No affinity found” means the partner exists in Qloo but did not appear among these comps&apos; audience affinities in this run. Markets from the model
-            alone have no fan-concentration evidence.
+            “+N vs typical” is Qloo&apos;s affinity for these comps&apos; fans minus its affinity for a typical audience, in points, measured the same way for both arms.
+            {d.modelArm && d.crossoverArm && d.modelArm.medianLift !== null && d.crossoverArm.medianLift !== null
+              ? ` Median lift: model alone ${Math.round(d.modelArm.medianLift * 100)}, Crossover ${Math.round(d.crossoverArm.medianLift * 100)}; positive lift: ${d.modelArm.positive} of ${d.modelArm.scored} vs ${d.crossoverArm.positive} of ${d.crossoverArm.scored}.`
+              : " “Not in our top results” means the partner exists in Qloo but was not among this run's top results; it was not scored."}
           </p>
         </div>
       )}

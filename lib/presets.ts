@@ -62,6 +62,22 @@ export const PRESETS: Preset[] = [
     compTypes: ["tv_show"],
     swap: { from: "Barry", to: "The Bear" },
   },
+  {
+    id: "comedy-special-tour",
+    label: "Comedy special + tour",
+    blurb: "A stand-up special on streaming, then a 12-city tour. Comps: Ali Wong, John Mulaney, Hasan Minhaj.",
+    brief: {
+      title: "Small Talk, Big Room",
+      format: "special",
+      logline: "A first-generation comic's debut hour about family, money and growing up between two cultures, followed by a theatre tour.",
+      comps: ["Ali Wong", "John Mulaney", "Hasan Minhaj"],
+      regions: ["US"],
+      budget: "M",
+      exclusions: ["gambling"],
+    },
+    compTypes: ["person"],
+    swap: { from: "Hasan Minhaj", to: "Taylor Tomlinson" },
+  },
 ];
 
 const norm = (xs: string[]) =>

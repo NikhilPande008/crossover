@@ -70,6 +70,10 @@ export const SYNTHETIC_POOLS: Record<string, { name: string; tags?: string[] }[]
     "A House With Thin Walls", "The Driftwood Year", "Salt and Static", "Letters to the Lake", "The Bone Orchard",
     "Small Hours", "Everything We Kept", "The Fog Index",
   ].map((name) => ({ name })),
+  "urn:entity:person": [
+    "Dot Halloran", "Benji Akers", "Mara Velez", "Theo Quint", "Priya Lockett", "Sully Barnes", "June Okafor", "Remy Castillo",
+    "Hattie Moss", "Ollie Strand",
+  ].map((name) => ({ name })),
   "urn:entity:brand": [
     { name: "Thornfield Coffee Co.", tags: ["coffee"] },
     { name: "Lumen Outfitters", tags: ["apparel"] },
@@ -91,6 +95,8 @@ const SYNTHETIC_TAGS = [
   "indie folk", "dread", "family drama", "cult", "awkward comedy", "first love", "ritual", "atmospheric",
   "suburban ennui", "unreliable narrator", "found family", "road trip",
 ];
+
+const SYNTHETIC_GENRES = ["horror", "comedy", "drama", "coming_of_age", "folk", "satire"];
 
 const AGE_BUCKETS = ["24_and_younger", "25_to_29", "30_to_34", "35_to_44", "45_to_54", "55_and_older"];
 
@@ -116,7 +122,10 @@ export function fixtureResponse(req: QlooRequest): unknown {
     const type = (p.types ?? "urn:entity:movie").split(",")[0];
     const r = rng(fnv1a(q.toLowerCase()));
     const year = 1995 + Math.floor(r() * 29);
-    const base = { types: [type], popularity: Math.round(r() * 1000) / 1000 };
+    const g1 = SYNTHETIC_GENRES[Math.floor(r() * SYNTHETIC_GENRES.length)];
+    const g2 = SYNTHETIC_GENRES[(SYNTHETIC_GENRES.indexOf(g1) + 1) % SYNTHETIC_GENRES.length];
+    const tags = [g1, g2].map((g) => ({ tag_id: `urn:tag:genre:media:syn_${g}`, name: g, type: "urn:tag:genre:media" }));
+    const base = { types: [type], popularity: Math.round(r() * 1000) / 1000, tags };
     return {
       results: [
         { ...base, entity_id: synId("comp", q.toLowerCase()), name: q, properties: { release_year: year, short_description: "Synthetic fixture entity" } },
@@ -128,6 +137,8 @@ export function fixtureResponse(req: QlooRequest): unknown {
 
   if (req.path === "/v2/tags") {
     const q = (p["filter.query"] ?? "").toLowerCase();
+    if ((p["filter.tag.types"] ?? "").includes("genre:media"))
+      return { results: { tags: SYNTHETIC_GENRES.filter((g) => q.includes(g) || g.includes(q.split(" ")[0] ?? "")).map((g) => ({ id: `urn:tag:genre:media:syn_${g}`, name: g })) } };
     const brandTags = new Set(SYNTHETIC_POOLS["urn:entity:brand"].flatMap((b) => b.tags ?? []));
     const hits = [...brandTags].filter((t) => q.includes(t) || t.includes(q));
     return { results: { tags: (hits.length ? hits : [...brandTags].slice(0, 1)).map((t) => ({ id: `syn-tag-${t}`, name: t })) } };
@@ -159,7 +170,7 @@ export function fixtureResponse(req: QlooRequest): unknown {
 
   if (req.path === "/v2/insights") {
     const type = p["filter.type"];
-    const vecs = compVectors(p["signal.interests.entities"] ?? "");
+    const vecs = [...compVectors(p["signal.interests.entities"] ?? ""), ...compVectors(p["signal.interests.tags"] ?? "")];
     if (!vecs.length) return { success: false, results: {} };
     const signal = mean(vecs);
     const take = Number(p.take ?? 10);
@@ -201,6 +212,18 @@ export function fixtureResponse(req: QlooRequest): unknown {
 
     const pool = SYNTHETIC_POOLS[type];
     if (!pool) return { success: false, error: { message: `Unsupported filter.type ${type}` } };
+    // filter.results.entities: score exactly these entities (pool items by ID, anything else by its ID).
+    const only = (p["filter.results.entities"] ?? "").split(",").filter(Boolean);
+    if (only.length) {
+      const byId = new Map(pool.map((e) => [synId(type.split(":").pop()!, e.name), e.name]));
+      return {
+        success: true,
+        results: {
+          entities: only.map((id) => ({ entity_id: id, name: byId.get(id) ?? id, types: [type], popularity: 0.5, query: { affinity: affinity(signal, byId.get(id) ?? id) } })),
+        },
+      };
+    }
+    const minPop = Number(p["filter.popularity.min"] ?? 0);
     const excluded = new Set((p["filter.exclude.entities"] ?? "").split(",").filter(Boolean));
     const entities = pool
       .map((e) => ({
@@ -211,7 +234,7 @@ export function fixtureResponse(req: QlooRequest): unknown {
         popularity: Math.round(rng(fnv1a(e.name + "pop"))() * 1000) / 1000,
         query: { affinity: affinity(signal, e.name) },
       }))
-      .filter((e) => !excluded.has(e.entity_id))
+      .filter((e) => !excluded.has(e.entity_id) && e.popularity >= minPop)
       .sort((x, y) => y.query.affinity - x.query.affinity)
       .slice(0, take);
     return { success: true, results: { entities } };

@@ -15,6 +15,7 @@ export const SearchResponse = z.looseObject({
         types: z.array(z.string()).optional(),
         type: z.string().optional(),
         popularity: num.optional(),
+        tags: z.array(z.looseObject({ tag_id: z.string().optional(), id: z.string().optional() })).optional(),
         properties: z
           .looseObject({
             release_year: num.optional(),

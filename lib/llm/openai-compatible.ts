@@ -133,7 +133,7 @@ export class OpenAICompatibleLLM implements LLM {
     this.reasoningEffort = o.reasoningEffort || undefined;
     // Local models on a laptop are slow; give each call room.
     // Hosted calls must fail well inside the plan route's 120 s limit, so the run can fall back to templates.
-    this.timeoutMs = o.timeoutMs ?? (o.provider === "ollama" ? 240_000 : 40_000);
+    this.timeoutMs = o.timeoutMs ?? (o.provider === "ollama" ? 240_000 : 30_000);
   }
 
   private async post(body: Record<string, unknown>, m: Metering) {
@@ -141,14 +141,26 @@ export class OpenAICompatibleLLM implements LLM {
       method: "POST",
       headers: { "content-type": "application/json", ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}) },
       body: JSON.stringify(body),
-      signal: callSignal(callTimeout(this.timeoutMs, m.deadline), m.signal),
+      signal: callSignal(callTimeout(m.maxMs ?? this.timeoutMs, m.deadline), m.signal),
     });
+  }
+
+  /** One retry when an attempt times out (a stalled request), if the run still has time for it. */
+  private async postWithRetry(body: Record<string, unknown>, m: Metering) {
+    try {
+      return await this.post(body, m);
+    } catch (e) {
+      const timedOut = e instanceof Error && (e.name === "TimeoutError" || /timed? ?out/i.test(e.message));
+      if (!timedOut || m.signal?.aborted || (m.deadline && m.deadline - Date.now() < 8_000)) throw e;
+      console.warn("[llm-timeout] retrying once");
+      return this.post(body, m);
+    }
   }
 
   private async chat(body: Record<string, unknown>, m: Metering): Promise<OAIResponse> {
     const started = Date.now();
     const full: Record<string, unknown> = { model: this.model, temperature: 0, ...(this.reasoningEffort ? { reasoning_effort: this.reasoningEffort } : {}), ...body };
-    let r = await this.post(full, m);
+    let r = await this.postWithRetry(full, m);
     if (r.status === 400 && this.reasoningEffort) {
       const text = await r.text().catch(() => "");
       if (/reasoning/i.test(text)) {

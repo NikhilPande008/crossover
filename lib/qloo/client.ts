@@ -3,6 +3,7 @@
 // and a trace hook. In fixture mode it answers from the synthetic generator.
 
 import { config } from "@/lib/config";
+import { kv, kvDurable } from "@/lib/store/kv";
 import { assertParams } from "./params";
 import { fixtureResponse } from "./fixture";
 
@@ -29,7 +30,7 @@ export class QlooError extends Error {
 
 export class BudgetExhaustedError extends Error {}
 
-// ---- process-wide state (single long-running Node host) ----
+// ---- process-wide state; responses are also shared across instances through the durable store ----
 
 type CacheEntry = { data: unknown; retrievedAt: string; synthetic: boolean };
 const CACHE_MAX = 2000;
@@ -131,7 +132,15 @@ export class QlooClient {
     const req = { path, params };
     assertParams(path, params);
     const key = `${this.mode}:${cacheKey(req)}`;
-    const hit = readCache(key);
+    let hit = readCache(key);
+    // Another instance may have fetched it: a comp swap on Vercel then re-uses its calls.
+    if (!hit && kvDurable() && this.mode === "live") {
+      const shared = await kv.get<CacheEntry & { at: number }>(`qloo:${key}`);
+      if (shared && Date.now() - shared.at < CACHE_TTL_MS) {
+        writeCache(key, shared);
+        hit = shared;
+      }
+    }
     if (hit) {
       this.cachedCalls++;
       const res: QlooResponse = { ...hit, status: 200, cached: true, ms: 0 };
@@ -154,6 +163,7 @@ export class QlooClient {
         ms: Date.now() - started,
       };
       writeCache(key, { data, retrievedAt: res.retrievedAt, synthetic: res.synthetic });
+      if (kvDurable() && this.mode === "live") void kv.set(`qloo:${key}`, { data, retrievedAt: res.retrievedAt, synthetic: false, at: Date.now() }, CACHE_TTL_MS / 1000);
       this.opts.onCall?.({ req, res });
       return res;
     } catch (e) {

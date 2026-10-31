@@ -4,9 +4,14 @@
 
 // Per docs.qloo.com/reference/available-parameters-by-entity-type. feature.explainability
 // is not in that table but is sent by Qloo's own harness (recommend workflow).
+// filter.results.entities scores named entities for the signal's audience (verified live
+// 2026-10-31); signal.interests.tags with filter.popularity.min builds a genre-signal pool.
 const COMMON_INSIGHTS = [
   "filter.type",
   "signal.interests.entities",
+  "signal.interests.tags",
+  "filter.results.entities",
+  "filter.popularity.min",
   "filter.exclude.entities",
   "feature.explainability",
   "take",
@@ -24,6 +29,7 @@ export const ALLOWED_PARAMS: Record<string, string[]> = {
   "insights:urn:entity:movie": COMMON_INSIGHTS,
   "insights:urn:entity:book": COMMON_INSIGHTS,
   "insights:urn:entity:brand": COMMON_INSIGHTS,
+  "insights:urn:entity:person": COMMON_INSIGHTS,
   // The parameter table lists only diversify.*/offset/take for urn:tag, but the taste-analysis
   // guide and the harness use signal.interests.entities and filter.tag.types with it.
   "insights:urn:tag": ["filter.type", "signal.interests.entities", "filter.tag.types", "diversify.by", "diversify.take", "take", "offset"],
@@ -52,4 +58,4 @@ export const DOMAIN_URN = {
   brand: "urn:entity:brand",
 } as const;
 
-export const ENTITY_TYPE_URN = DOMAIN_URN;
+export const ENTITY_TYPE_URN = { ...DOMAIN_URN, person: "urn:entity:person" } as const;

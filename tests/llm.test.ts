@@ -153,11 +153,12 @@ describe("full agent run through an OpenAI-compatible model", () => {
             : [{ id: "c", type: "function", function: { name: "finish_research", arguments: JSON.stringify({ reason: "enough" }) } }];
         return { json: { model: "open-model", choices: [{ finish_reason: "tool_calls", message: { content: null, tool_calls } }], usage: { prompt_tokens: 2000, completion_tokens: 200 } } };
       }
+      if (sys.includes("rewrite creative angles")) return reply(JSON.stringify({ angles: [] }), { prompt_tokens: 1000, completion_tokens: 100 });
       if (sys.includes("campaign strategist")) {
         const concept = (lever: string, m: string[], p: string[]) => ({ lever, name: `${lever} plan`, leadCompIds: [comps[0].entityId], marketKeys: m, partnerKeys: p, creativeAngle: { text: "Lean into dread.", factIds: [] }, risks: ["Narrow reach."], hypotheses: ["Podcasts may convert."] });
         return reply(JSON.stringify({ concepts: [concept("market", ["M1", "M2", "M3"], ["P1", "P2", "P3", "P4"]), concept("partner", ["M4", "M5", "M6"], ["P5", "P6", "P7", "P8"]), concept("crossover", ["M7", "M8", "M9"], ["P9", "P10", "P11", "P12"])] }), { prompt_tokens: 5000, completion_tokens: 1500 });
       }
-      return reply(JSON.stringify({ recommendedLever: "partner", rationale: [{ text: "This plan rests on shared signals.", factIds: ["F1"] }], whyNotOthers: [], tradeoffs: ["Broader reach."], testChecklist: ["Run a small paid test."] }), { prompt_tokens: 4000, completion_tokens: 600 });
+      return reply(JSON.stringify({ recommendedLever: "partner", rationale: [{ text: "This plan rests on shared signals.", factIds: ["F1"] }], whyNotOthers: [], tradeoffs: ["Broader reach."], tests: [{ type: "creative_ab", subjects: [], why: "Shows which cut lands." }] }), { prompt_tokens: 4000, completion_tokens: 600 });
     });
 
     const run = await runPlan({ brief: preset.brief, comps, mode: "fixture" });
@@ -166,10 +167,11 @@ describe("full agent run through an OpenAI-compatible model", () => {
     expect(run.concepts.map((c) => c.name)).toEqual(["market plan", "partner plan", "crossover plan"]);
     expect(run.decision.writtenBy).toBe("llm");
     const u = run.llmUsage;
-    expect(u.byPhase.map((p) => p.phase)).toEqual(["research", "conceive", "brief"]);
-    expect(u).toMatchObject({ provider: "openai", calls: 4, inputTokens: 13_000, outputTokens: 2_500 });
-    expect(u.costUsd).toBeCloseTo((13_000 * 0.2 + 2_500 * 0.6) / 1e6, 9);
-    expect(run.trace.filter((t) => t.kind === "llm" && /in \/ .* out/.test(t.message)).length).toBe(4);
+    // The angles cite no facts, so the agent is asked once to repair them before the template is used.
+    expect(u.byPhase.map((p) => p.phase)).toEqual(["research", "conceive", "repair", "brief"]);
+    expect(u).toMatchObject({ provider: "openai", calls: 5, inputTokens: 14_000, outputTokens: 2_600 });
+    expect(u.costUsd).toBeCloseTo((14_000 * 0.2 + 2_600 * 0.6) / 1e6, 9);
+    expect(run.trace.filter((t) => t.kind === "llm" && /in \/ .* out/.test(t.message)).length).toBe(5);
   });
 });
 

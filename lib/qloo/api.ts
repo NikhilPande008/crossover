@@ -7,9 +7,10 @@ import { nearestCity, REGIONS } from "@/lib/geo/cities";
 import { QlooClient, QlooError, type QlooResponse } from "./client";
 import { DOMAIN_URN, ENTITY_TYPE_URN } from "./params";
 import { parseCompare } from "./compare";
+import { isSensitive } from "@/lib/validate/sensitive";
 import { CompareResponse, DemographicsResponse, EntitiesResponse, HeatmapResponse, SearchResponse, TagsResponse } from "./schemas";
 
-export type Candidate = { entityId: string; name: string; type: EntityType; year?: number; descriptor?: string };
+export type Candidate = { entityId: string; name: string; type: EntityType; year?: number; descriptor?: string; genres?: string[] };
 
 const URN_TO_TYPE: Record<string, EntityType> = {
   "urn:entity:movie": "movie",
@@ -18,6 +19,7 @@ const URN_TO_TYPE: Record<string, EntityType> = {
   "urn:entity:book": "book",
   "urn:entity:podcast": "podcast",
   "urn:entity:brand": "brand",
+  "urn:entity:person": "person",
 };
 
 export async function searchEntities(client: QlooClient, query: string, types: EntityType[], take = 5): Promise<Candidate[]> {
@@ -36,8 +38,15 @@ export async function searchEntities(client: QlooClient, query: string, types: E
       type: URN_TO_TYPE[urn] ?? types[0],
       year: r.properties?.release_year ?? r.properties?.year,
       descriptor: clip(r.properties?.short_description ?? r.properties?.description, 280),
+      genres: genreTags(r.tags),
     };
   });
+}
+
+/** The entity's own media-genre tags (e.g. urn:tag:genre:media:horror), in Qloo's order. */
+function genreTags(tags: { tag_id?: string; id?: string }[] | undefined): string[] | undefined {
+  const out = (tags ?? []).map((t) => t.tag_id ?? t.id ?? "").filter((id) => /^urn:tag:genre:media:[a-z0-9_]+$/.test(id));
+  return out.length ? [...new Set(out)].slice(0, 6) : undefined;
 }
 
 /** Shorten to at most n characters, at a word boundary. */
@@ -105,11 +114,13 @@ export async function fetchAffinities(
  * themes ("Brand Building"). Creative angles need story tags: urn:tag:<type>:<media|qloo>:…
  * with a story type. Checked against live Hereditary and Fleabag tag lists (2026-10-30).
  */
-const STORY_TAG_TYPES = new Set(["plot", "style", "motif", "archetype", "character", "audience", "mood", "keyword"]);
+// "audience" tags ("Psychological Thriller Fans") describe people, not the story, so they are not angle evidence.
+const STORY_TAG_TYPES = new Set(["plot", "style", "motif", "archetype", "character", "mood", "keyword"]);
 
-export function isCreativeTag(tagId: string | undefined): boolean {
+/** A story tag usable as creative-angle evidence. Tags naming a sensitive trait are never used. */
+export function isCreativeTag(tagId: string | undefined, name?: string): boolean {
   const [, , type, domain] = (tagId ?? "").split(":");
-  return (domain === "media" || domain === "qloo") && STORY_TAG_TYPES.has(type);
+  return (domain === "media" || domain === "qloo") && STORY_TAG_TYPES.has(type) && !(name && isSensitive(name));
 }
 
 export async function fetchTags(client: QlooClient, store: FactStore, comps: Comp[], take = 12): Promise<Fact[]> {
@@ -120,7 +131,7 @@ export async function fetchTags(client: QlooClient, store: FactStore, comps: Com
   if (!parsed.success) return [];
   return parsed.data.results.tags
     .map((t) => ({ ...t, aff: t.affinity ?? t.query?.affinity }))
-    .filter((t): t is typeof t & { aff: number } => typeof t.aff === "number" && isCreativeTag(t.tag_id ?? t.id))
+    .filter((t): t is typeof t & { aff: number } => typeof t.aff === "number" && isCreativeTag(t.tag_id ?? t.id, t.name))
     .slice(0, take)
     .map((t, i) =>
       store.add({
@@ -183,11 +194,20 @@ export async function fetchDemographics(client: QlooClient, store: FactStore, co
 // Qloo rejects take > 50 ("take must be an integer value between 1 and 50"); a country
 // query still returns ~1,000 regional cells at that setting.
 export async function fetchHeatmap(client: QlooClient, store: FactStore, comp: Comp, region: string, take = 50): Promise<Fact[]> {
+  return heatmapFacts(client, store, comp.entityId, [comp.entityId], region, take);
+}
+
+/** Where the reference audience concentrates: the baseline that over-index is measured against. */
+export async function fetchBaselineHeatmap(client: QlooClient, store: FactStore, baselineIds: string[], region: string): Promise<Fact[]> {
+  return heatmapFacts(client, store, baselineIds.join(","), [], region, 50, true);
+}
+
+async function heatmapFacts(client: QlooClient, store: FactStore, signal: string, compIds: string[], region: string, take: number, baseline = false): Promise<Fact[]> {
   const r = REGIONS[region];
   if (!r) return [];
   const params = {
     "filter.type": "urn:heatmap",
-    "signal.interests.entities": comp.entityId,
+    "signal.interests.entities": signal,
     "filter.location.query": r.locationQuery,
     take: String(take),
   };
@@ -206,13 +226,186 @@ export async function fetchHeatmap(client: QlooClient, store: FactStore, comp: C
   }
   return [...byCity.entries()].map(([name, vs]) =>
     store.add({
-      ...base(res, "/v2/insights", params, [comp.entityId]),
+      ...base(res, "/v2/insights", params, compIds),
       kind: "heatmap",
       subject: { name, type: `city:${r.country}` },
       value: Math.round((vs.reduce((s, v) => s + v, 0) / vs.length) * 1000) / 1000,
-      detail: { cells: vs.length, best_cell: Math.max(...vs) },
+      detail: { cells: vs.length, best_cell: Math.max(...vs), ...(baseline ? { baseline: 1 } : {}) },
     }),
   );
+}
+
+// ---------- lift scoring, genre pools, cross-comp affinity, similar titles ----------
+
+type Target = { entityId: string; name: string; type?: string };
+
+/**
+ * Score named entities for one audience with filter.results.entities (verified live 2026-10-31).
+ * `role` decides the fact: "comps" → affinity facts for all comps combined (detail.scored);
+ * "baseline" → baseline facts for the reference audience.
+ */
+export async function scoreEntities(
+  client: QlooClient,
+  store: FactStore,
+  args: { filterType: string; signalIds: string[]; targets: Target[]; compIds: string[]; role: "comps" | "baseline"; subjectType: string },
+): Promise<Fact[]> {
+  const out: Fact[] = [];
+  const unique = [...new Map(args.targets.map((t) => [t.entityId, t])).values()];
+  for (let i = 0; i < unique.length; i += 50) {
+    const chunk = unique.slice(i, i + 50);
+    const params = {
+      "filter.type": args.filterType,
+      "signal.interests.entities": args.signalIds.join(","),
+      "filter.results.entities": chunk.map((t) => t.entityId).join(","),
+      take: String(chunk.length),
+    };
+    const res = await client.get("/v2/insights", params);
+    const parsed = EntitiesResponse.safeParse(res.data);
+    if (!parsed.success) continue;
+    const byId = new Map(chunk.map((t) => [t.entityId, t]));
+    for (const e of parsed.data.results.entities) {
+      const id = e.entity_id ?? e.id;
+      const aff = e.affinity ?? e.query?.affinity;
+      const t = id ? byId.get(id) : undefined;
+      if (!t || typeof aff !== "number") continue;
+      out.push(
+        store.add({
+          ...base(res, "/v2/insights", params, args.role === "comps" ? args.compIds : []),
+          kind: args.role === "comps" ? "affinity" : "baseline",
+          subject: { entityId: t.entityId, name: t.name, type: args.subjectType },
+          value: Math.round(aff * 1000) / 1000,
+          detail: args.role === "comps" ? { scored: 1 } : { baseline: 1 },
+        }),
+      );
+    }
+  }
+  return out;
+}
+
+/**
+ * Partners loved by fans of the comps' genre (signal.interests.tags), above a popularity floor that
+ * drops the long-tail noise a tag signal returns. They join the candidate pool and are then scored
+ * for the comps' own audience; the genre affinity itself is not evidence about the comps.
+ */
+export async function fetchGenrePool(client: QlooClient, store: FactStore, domain: Domain, genreTags: string[], take = 15): Promise<Fact[]> {
+  if (!genreTags.length) return [];
+  const params = {
+    "filter.type": DOMAIN_URN[domain],
+    "signal.interests.tags": genreTags.join(","),
+    "filter.popularity.min": "0.8",
+    take: String(take),
+  };
+  const res = await client.get("/v2/insights", params);
+  const parsed = EntitiesResponse.safeParse(res.data);
+  if (!parsed.success) return [];
+  return parsed.data.results.entities
+    .map((e) => ({ ...e, id: e.entity_id ?? e.id, aff: e.affinity ?? e.query?.affinity }))
+    .filter((e): e is typeof e & { id: string; aff: number } => typeof e.aff === "number" && !!e.id)
+    .map((e, i) =>
+      store.add({
+        ...base(res, "/v2/insights", params, []),
+        kind: "affinity",
+        subject: { entityId: e.id, name: e.name, type: domain },
+        value: Math.round(e.aff * 1000) / 1000,
+        detail: {
+          rank: i + 1,
+          source: "genre",
+          ...(e.tags?.length ? { tags: e.tags.map((t) => t.name ?? "").filter(Boolean).join("|") } : {}),
+        },
+      }),
+    );
+}
+
+/** Titles a comp's fans love most (same entity type as the comp), ranked. Feeds comp discovery and "#2 film for X fans". */
+export async function fetchSimilar(client: QlooClient, store: FactStore, comp: Comp, take = 25): Promise<Fact[]> {
+  const params = { "filter.type": ENTITY_TYPE_URN[comp.type], "signal.interests.entities": comp.entityId, take: String(take) };
+  const res = await client.get("/v2/insights", params);
+  const parsed = EntitiesResponse.safeParse(res.data);
+  if (!parsed.success) return [];
+  return parsed.data.results.entities
+    .map((e) => ({ ...e, id: e.entity_id ?? e.id, aff: e.affinity ?? e.query?.affinity }))
+    .filter((e): e is typeof e & { id: string; aff: number } => typeof e.aff === "number" && !!e.id && e.id !== comp.entityId)
+    .map((e, i) =>
+      store.add({
+        ...base(res, "/v2/insights", params, [comp.entityId]),
+        kind: "similar",
+        subject: { entityId: e.id, name: e.name, type: comp.type },
+        value: Math.round(e.aff * 1000) / 1000,
+        detail: { rank: i + 1, ...(e.popularity !== undefined ? { popularity: Math.round(e.popularity * 1000) / 1000 } : {}) },
+      }),
+    );
+}
+
+/**
+ * Titles matching the logline: each keyword is looked up as a Qloo media-genre tag, then titles of
+ * the comps' type are ranked for that tag signal (popular ones only, to avoid long-tail noise).
+ */
+export async function fetchLoglineTitles(client: QlooClient, store: FactStore, keywords: string[], type: EntityType, take = 15): Promise<{ tags: string[]; facts: Fact[] }> {
+  const tagIds: string[] = [];
+  for (const k of keywords.slice(0, 3)) {
+    const res = await client.get("/v2/tags", { "filter.query": k, "filter.tag.types": "urn:tag:genre:media", take: "3" });
+    const parsed = TagsResponse.safeParse(res.data);
+    const hit = parsed.success ? parsed.data.results.tags.find((t) => (t.tag_id ?? t.id ?? "").startsWith("urn:tag:genre:media:")) : undefined;
+    const id = hit?.tag_id ?? hit?.id;
+    if (id && !tagIds.includes(id)) tagIds.push(id);
+  }
+  if (!tagIds.length) return { tags: [], facts: [] };
+  const params = { "filter.type": ENTITY_TYPE_URN[type], "signal.interests.tags": tagIds.join(","), "filter.popularity.min": "0.7", take: String(take) };
+  const res = await client.get("/v2/insights", params);
+  const parsed = EntitiesResponse.safeParse(res.data);
+  if (!parsed.success) return { tags: tagIds, facts: [] };
+  const facts = parsed.data.results.entities
+    .map((e) => ({ ...e, id: e.entity_id ?? e.id, aff: e.affinity ?? e.query?.affinity }))
+    .filter((e): e is typeof e & { id: string; aff: number } => typeof e.aff === "number" && !!e.id)
+    .map((e, i) =>
+      store.add({
+        ...base(res, "/v2/insights", params, []),
+        kind: "similar",
+        subject: { entityId: e.id, name: e.name, type },
+        value: Math.round(e.aff * 1000) / 1000,
+        detail: { rank: i + 1, via: "logline", tags: tagIds.map((t) => t.split(":").pop()).join("|") },
+      }),
+    );
+  return { tags: tagIds, facts };
+}
+
+/**
+ * One audience or two: score the other comps (and control titles) inside one comp's audience, or
+ * inside the reference audience when `signal` is the baseline. Targets are grouped by entity type
+ * because filter.type must match them.
+ */
+export async function fetchCross(client: QlooClient, store: FactStore, signal: { comp?: Comp; baselineIds?: string[] }, targets: (Target & { type: EntityType; control?: boolean })[]): Promise<Fact[]> {
+  const out: Fact[] = [];
+  const byType = new Map<EntityType, typeof targets>();
+  for (const t of targets) byType.set(t.type, [...(byType.get(t.type) ?? []), t]);
+  for (const [type, ts] of byType) {
+    const params = {
+      "filter.type": ENTITY_TYPE_URN[type],
+      "signal.interests.entities": signal.comp ? signal.comp.entityId : (signal.baselineIds ?? []).join(","),
+      "filter.results.entities": ts.map((t) => t.entityId).join(","),
+      take: String(ts.length),
+    };
+    if (!params["signal.interests.entities"]) continue;
+    const res = await client.get("/v2/insights", params);
+    const parsed = EntitiesResponse.safeParse(res.data);
+    if (!parsed.success) continue;
+    const byId = new Map(ts.map((t) => [t.entityId, t]));
+    for (const e of parsed.data.results.entities) {
+      const t = byId.get(e.entity_id ?? e.id ?? "");
+      const aff = e.affinity ?? e.query?.affinity;
+      if (!t || typeof aff !== "number") continue;
+      out.push(
+        store.add({
+          ...base(res, "/v2/insights", params, signal.comp ? [signal.comp.entityId] : []),
+          kind: "cross",
+          subject: { entityId: t.entityId, name: t.name, type },
+          value: Math.round(aff * 1000) / 1000,
+          detail: { ...(signal.comp ? {} : { baseline: 1 }), ...(t.control ? { control: 1 } : {}) },
+        }),
+      );
+    }
+  }
+  return out;
 }
 
 const COMPARE_PATH = "/v2/analysis/compare";

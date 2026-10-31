@@ -8,11 +8,13 @@
 //     the subject of one of that sentence's own cited facts (not just exist somewhere),
 //  5. sensitive-trait language is blocked,
 //  6. comparative claims ("higher than", "the strongest", "among the top") about named
-//     partners or cities must match the run's scores (lib/validate/comparative.ts).
+//     partners or cities must match the run's scores (lib/validate/comparative.ts),
+//  7. a sentence claiming genre or theme interest needs a tag fact, not only fan-concentration facts.
 
 import type { Brief, Comp, Fact } from "@/lib/types";
 import { CITIES, REGIONS } from "@/lib/geo/cities";
 import { checkComparative, type ScoreScope } from "./comparative";
+import { SENSITIVE } from "./sensitive";
 
 export type Issue = { text: string; reason: string };
 
@@ -38,9 +40,6 @@ export type GroundingContext = {
   /** Run scores for checking comparative claims (rule 6). Set once scores and concepts exist. */
   scores?: ScoreScope;
 };
-
-const SENSITIVE =
-  /\b(ethnic\w*|race|racial|religio\w*|christian|muslim|jewish|hindu|sikh|buddhist|black people|white people|latino|latina|latinx|hispanic|asian people|disabilit\w*|disabled|mental illness|depress(ed|ion)|anxiety disorder|pregnan\w*|sexual orientation|gay|lesbian|transgender|immigrant|undocumented|diagnos\w*)\b/i;
 
 // Capitalised words that are ordinary English or product vocabulary, never entities.
 const STOP = new Set(
@@ -170,7 +169,7 @@ export function checkNumbers(text: string, factIds: string[], ctx: GroundingCont
 }
 
 /** Candidate entity mentions: quoted strings and runs of Capitalised words. */
-export function entityMentions(text: string, keep?: Set<string>): string[] {
+export function entityMentions(text: string, keep?: Set<string>, knownWords?: Set<string>): string[] {
   const clean = stripCitations(text, keep);
   const out = new Set<string>();
   for (const m of clean.matchAll(/["“]([^"”]{2,60})["”]/g)) out.add(m[1].trim());
@@ -191,8 +190,11 @@ export function entityMentions(text: string, keep?: Set<string>): string[] {
         if (/[,;:)]$/.test(words[j - 1])) break;
       }
       let run = words.slice(i, j);
-      // A lone capitalised word at sentence start is usually just capitalised by position.
+      // A lone capitalised word at sentence start is usually just capitalised by position. So is the
+      // first word of a longer run when it is no word of any known name ("Expand The Tithe's",
+      // "Connect Glass Summer"): drop it and check the rest.
       if (i === 0 && run.length === 1) run = [];
+      else if (i === 0 && knownWords && !knownWords.has(bare(run[0]).toLowerCase().replace(/[’']s$/, ""))) run = run.slice(1);
       while (run.length && stop(run[0])) run = run.slice(1);
       if (run.some((w) => !stop(w))) out.add(run.map(bare).join(" "));
       i = j;
@@ -206,8 +208,11 @@ export function entityMentions(text: string, keep?: Set<string>): string[] {
  * of some known name (allowing a plural or possessive "s"). Substrings do not count: "Ghostbusters"
  * is not known because "Ghost" is.
  */
+/** Descriptive suffixes on a name ("Portland-centric", "Fleabag-themed") are not part of the name. */
+const NAME_SUFFIX = /-(centric|themed|style|styled|based|focused|inspired|esque|like|adjacent|loving|led|first|heavy|leaning|friendly)\b/g;
+
 function isKnown(mention: string, ctx: GroundingContext): boolean {
-  const m = mention.toLowerCase().replace(/[’']s$/, "").trim();
+  const m = mention.toLowerCase().replace(NAME_SUFFIX, "").replace(/[’']s$/, "").trim();
   if (!m || ctx.known.has(m)) return true;
   const words = wordsOf(m).filter((w) => !STOP.has(w.replace(/[^a-z&'-]/g, "")));
   if (!words.length) return true;
@@ -216,7 +221,7 @@ function isKnown(mention: string, ctx: GroundingContext): boolean {
 }
 
 export function checkEntities(text: string, ctx: GroundingContext): Issue | null {
-  for (const mention of entityMentions(text, ctx.known)) {
+  for (const mention of entityMentions(text, ctx.known, ctx.knownWords)) {
     if (!isKnown(mention, ctx)) return { text, reason: `unknown entity "${mention}"` };
   }
   return null;
@@ -260,11 +265,30 @@ export function checkSensitive(text: string, ctx?: GroundingContext): Issue | nu
   return m ? { text, reason: `sensitive-trait language "${m[0]}"` } : null;
 }
 
+/**
+ * Rule 7: a fan-concentration (heatmap) fact says where a comp's fans concentrate, nothing about
+ * interest in a genre or theme. "Cities with strong horror interest" needs a tag fact.
+ */
+const INTEREST = /\b(interest|enthusias\w*|appetite|passion|demand)\s+(in|for)\b|\b(horror|comedy|drama|thriller|music|indie)\s+(interest|fans?|lovers?|scene)\b/i;
+export function checkInterpretation(text: string, factIds: string[], ctx: GroundingContext): Issue | null {
+  const kinds = new Set(factIds.map((id) => ctx.facts.get(id)?.kind));
+  if (!INTEREST.test(stripCitations(text, ctx.known))) return null;
+  if (kinds.has("tag") || kinds.has("compare")) return null;
+  if (kinds.has("heatmap")) return { text, reason: "claims genre or theme interest, but its only evidence is where fans concentrate" };
+  return null;
+}
+
 /** Validate an interpretation: needs ≥1 valid fact ID, grounded numbers and names. */
 export function validateCited(item: { text: string; factIds: string[] }, ctx: GroundingContext): { ok: true; factIds: string[] } | { ok: false; issue: Issue } {
   const valid = item.factIds.filter((id) => ctx.facts.has(id));
   if (!valid.length) return { ok: false, issue: { text: item.text, reason: "no valid fact citation" } };
-  const issue = checkSensitive(item.text, ctx) ?? checkNumbers(item.text, valid, ctx) ?? checkEntities(item.text, ctx) ?? checkCitedSubjects(item.text, valid, ctx) ?? checkComparativeClaim(item.text, ctx);
+  const issue =
+    checkSensitive(item.text, ctx) ??
+    checkNumbers(item.text, valid, ctx) ??
+    checkEntities(item.text, ctx) ??
+    checkCitedSubjects(item.text, valid, ctx) ??
+    checkComparativeClaim(item.text, ctx) ??
+    checkInterpretation(item.text, valid, ctx);
   return issue ? { ok: false, issue } : { ok: true, factIds: valid };
 }
 

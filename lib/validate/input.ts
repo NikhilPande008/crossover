@@ -10,7 +10,7 @@ const compName = name.refine((s) => !PERSONAL.test(s), "Enter a film, series or 
 
 export const BriefSchema = z.object({
   title: name,
-  format: z.enum(["film", "series", "album", "tour"]),
+  format: z.enum(["film", "series", "album", "tour", "special"]),
   logline: z.string().trim().max(400).optional(),
   comps: z.array(compName).min(2).max(4),
   regions: z.array(z.string().refine((r) => r in REGIONS, "Unsupported region")).min(1).max(2),
@@ -21,8 +21,10 @@ export const BriefSchema = z.object({
 export const CompSchema = z.object({
   name,
   entityId: z.string().min(1).max(200),
-  type: z.enum(["movie", "tv_show", "artist", "book", "podcast", "brand"]),
+  type: z.enum(["movie", "tv_show", "artist", "book", "podcast", "brand", "person"]),
   year: z.number().optional(),
+  // The title's own Qloo media-genre tags; only the documented tag-ID shape is accepted.
+  genres: z.array(z.string().regex(/^urn:tag:genre:media:[a-z0-9_]{1,60}$/)).max(6).optional(),
   // Display-only text from Qloo search; live descriptions can run past 600 characters, so clip rather than reject.
   descriptor: z
     .string()
@@ -47,7 +49,7 @@ export const PlanRequest = z.object({
 
 export const ResolveRequest = z.object({
   comps: z.array(compName).min(1).max(4),
-  format: z.enum(["film", "series", "album", "tour"]),
+  format: z.enum(["film", "series", "album", "tour", "special"]),
   /** Autocomplete lookups, capped separately from the confirm step. */
   suggest: z.boolean().optional(),
 });

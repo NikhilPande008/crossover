@@ -48,7 +48,7 @@ export class AnthropicLLM implements LLM {
         tools,
         output_config: { effort },
       },
-      { timeout: callTimeout(40_000, m.deadline), signal: m.signal, ...(m.deadline ? { maxRetries: 0 } : {}) },
+      { timeout: callTimeout(m.maxMs ?? 40_000, m.deadline), signal: m.signal, ...(m.deadline ? { maxRetries: 0 } : {}) },
     );
     this.meter(m, res, started);
     if (res.stop_reason === "refusal") throw new Error("LLM declined the request");
@@ -73,7 +73,7 @@ export class AnthropicLLM implements LLM {
         messages: [{ role: "user", content: user }],
         output_config: { effort, format: { type: fmt.type, schema: fmt.schema } },
       },
-      { timeout: callTimeout(40_000, m.deadline), signal: m.signal, ...(m.deadline ? { maxRetries: 0 } : {}) },
+      { timeout: callTimeout(m.maxMs ?? 40_000, m.deadline), signal: m.signal, ...(m.deadline ? { maxRetries: 0 } : {}) },
     );
     const res = await stream.finalMessage();
     this.meter(m, res, started);
