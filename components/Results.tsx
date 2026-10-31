@@ -172,6 +172,7 @@ function RunHeader({ result, busy, steps, preset, refinements, onRefine, onSwap 
  * how many comp pairs Qloo's theme compare says share an audience. Built from the run's own data.
  */
 function LeadLine({ result }: { result: RunResult }) {
+  const { facts } = useEvidence();
   const rec = result.concepts.find((c) => c.id === result.decision.recommendedId);
   if (!rec) return null;
   const name = (id: string) => result.comps.find((c) => c.entityId === id)?.name ?? id;
@@ -185,7 +186,8 @@ function LeadLine({ result }: { result: RunResult }) {
         · {LEVER_LABEL[rec.lever].toLowerCase()} concept
         {pairs.length > 0 && ` · ${shared} of ${pairs.length} comp pair${pairs.length === 1 ? "" : "s"} share an audience (Qloo theme overlap)`}
       </span>
-      {pairs.length > 0 && <FactChips ids={pairs.flatMap((o) => o.factIds)} title="One audience or two?" max={1} />}
+      {/* The verdict rests on the compare facts (shared vs. one-sided themes), so those are the evidence shown. */}
+      {pairs.length > 0 && <FactChips ids={pairs.flatMap((o) => o.factIds).filter((id) => facts.get(id)?.kind === "compare")} title="One audience or two?" max={1} />}
     </div>
   );
 }

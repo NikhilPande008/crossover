@@ -27,7 +27,7 @@ test("preset → plan → evidence → comp swap → brief", async ({ page }) =>
   await page.getByRole("button", { name: /^Open evidence F\d+$/ }).first().click();
   const drawer = page.getByRole("dialog", { name: "Evidence" });
   await expect(drawer).toBeVisible();
-  await expect(drawer.getByText(/GET \/v2\/insights/).first()).toBeVisible();
+  await expect(drawer.getByText(/GET \/v2\/(insights|analysis\/compare)/).first()).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(drawer).toBeHidden();
 
